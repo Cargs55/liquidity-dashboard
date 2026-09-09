@@ -1,0 +1,1 @@
+{"functions":{"api/data.js":{"maxDuration":60}},"crons":[{"path":"/api/data","schedule":"0 */6 * * *"}],"headers":[{"source":"/(.*)","headers":[{"key":"X-Content-Type-Options","value":"nosniff"}]}]}

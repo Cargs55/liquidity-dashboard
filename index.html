@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Liquidity Dashboard</title>
+<meta name="description" content="Single source of truth for global liquidity: a composite dial built from funding plumbing, credit, central bank balance sheets, money supply and the dollar — with market-by-market drill-down.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%232a78d6'/%3E%3Cpath d='M50 50 L50 15' stroke='white' stroke-width='8' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root{color-scheme:light;--bg:#f6f6f4;--surface:#ffffff;--surface-2:#f0f0ed;--line:#e2e2de;--ink:#0b0b0b;--ink-2:#52514e;--ink-3:#8a8985;--accent:#2a78d6;
+ --c-stressed:#e34948;--c-tight:#eb6834;--c-neutral:#9a9a95;--c-easing:#1baf7a;--c-abundant:#2a78d6;--pos:#1baf7a;--neg:#e34948;--warn:#eda100;--radius:14px;--shadow:0 1px 2px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.05)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#111110;--surface:#1a1a19;--surface-2:#222221;--line:#2e2e2c;--ink:#ffffff;--ink-2:#c3c2b7;--ink-3:#8a8985;--accent:#3987e5;--c-stressed:#e66767;--c-tight:#d95926;--c-neutral:#7a7a76;--c-easing:#199e70;--c-abundant:#3987e5;--pos:#199e70;--neg:#e66767;--warn:#c98500;--shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.35)}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#111110;--surface:#1a1a19;--surface-2:#222221;--line:#2e2e2c;--ink:#ffffff;--ink-2:#c3c2b7;--ink-3:#8a8985;--accent:#3987e5;--c-stressed:#e66767;--c-tight:#d95926;--c-neutral:#7a7a76;--c-easing:#199e70;--c-abundant:#3987e5;--pos:#199e70;--neg:#e66767;--warn:#c98500;--shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.35)}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif}
+a{color:var(--accent)}
+.wrap{max-width:1180px;margin:0 auto;padding:16px 18px 60px}
+header.top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:6px 0 14px}
+.brand{display:flex;align-items:center;gap:10px}.brand svg{width:34px;height:34px}.brand h1{font-size:19px;margin:0;letter-spacing:-.01em}.brand .sub{font-size:12px;color:var(--ink-3)}
+.pills{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pill{font-size:12px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink-2);white-space:nowrap}
+.pill.ok{border-color:color-mix(in srgb,var(--pos) 50%,var(--line))}.pill.warn{border-color:var(--warn)}.pill.bad{border-color:var(--neg)}
+.toggle{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--surface)}
+.toggle button{border:0;background:transparent;color:var(--ink-2);font:inherit;font-size:12px;padding:6px 12px;cursor:pointer}.toggle button.on{background:var(--ink);color:var(--bg)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 20px;margin:14px 0}
+h2{font-size:17px;margin:0 0 6px;letter-spacing:-.01em}h3{font-size:14px;margin:14px 0 6px}
+.lede{color:var(--ink-2);margin:0 0 12px;font-size:14px}
+.hero{display:grid;grid-template-columns:minmax(280px,420px) 1fr;gap:22px;align-items:center}
+@media (max-width:820px){.hero{grid-template-columns:1fr}}
+.dial{width:100%;max-width:420px;margin:0 auto;display:block}
+.dial text{font-family:inherit}
+.headline{font-size:24px;font-weight:700;letter-spacing:-.015em;margin:0 0 8px;line-height:1.25}
+.headline .band{padding:2px 10px;border-radius:8px;color:#fff;display:inline-block}
+.plain{font-size:16px;margin:0 0 10px}
+.trend{font-size:13px;color:var(--ink-2)}
+.kpis{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.kpi{background:var(--surface-2);border-radius:10px;padding:8px 12px;min-width:120px}.kpi .l{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em}.kpi .v{font-size:18px;font-weight:600}
+.expert{display:none;border-left:3px solid var(--accent);padding:8px 12px;margin:8px 0;background:var(--surface-2);border-radius:0 8px 8px 0;font-size:13.5px}
+body.expert .expert{display:block}
+.explain{font-size:13.5px;color:var(--ink-2)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media (max-width:820px){.grid2{grid-template-columns:1fr}}
+.tug{display:grid;grid-template-columns:1fr;gap:6px}
+.tug .row{display:grid;grid-template-columns:minmax(150px,1.2fr) 3fr minmax(90px,.7fr);gap:10px;align-items:center;font-size:13px;padding:4px 0;border-bottom:1px dashed var(--line)}
+.tug .row:last-child{border-bottom:0}
+.tug .name{color:var(--ink);font-weight:500}.tug .name small{display:block;color:var(--ink-3);font-weight:400;font-size:11.5px}
+.bar{position:relative;height:18px;background:var(--surface-2);border-radius:6px;overflow:hidden}
+.bar .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--ink-3);opacity:.6}
+.bar .fill{position:absolute;top:3px;bottom:3px;border-radius:4px}
+.bar .fill.pos{background:var(--pos);left:50%}.bar .fill.neg{background:var(--neg);right:50%}
+.val{font-variant-numeric:tabular-nums;text-align:right;color:var(--ink-2)}
+.blockhead{display:flex;justify-content:space-between;align-items:center;margin:14px 0 4px;padding-top:8px;border-top:1px solid var(--line)}
+.blockhead b{font-size:13.5px}.blockhead .bs{font-size:12px;color:var(--ink-2)}
+.meter{display:inline-flex;gap:2px;vertical-align:middle;margin-left:8px}.meter i{display:block;width:14px;height:8px;border-radius:2px;background:var(--surface-2);border:1px solid var(--line)}
+.meter i.on{border-color:transparent}
+.tensions{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.tension{background:var(--surface-2);border-radius:10px;padding:12px 14px}.tension b{display:block;margin-bottom:4px;font-size:14px}.tension p{margin:0;font-size:13.5px;color:var(--ink-2)}
+.regions{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.rcard{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .15s}
+.rcard:hover,.rcard.sel{border-color:var(--accent)}
+.rcard .n{font-weight:600;font-size:13.5px}.rcard .b{font-size:12px;margin-top:2px}.rcard .cov{font-size:11px;color:var(--ink-3)}
+.rdetail{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+.rhead{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+table.t{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+table.t th{text-align:left;color:var(--ink-3);font-weight:500;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;padding:6px 6px;border-bottom:1px solid var(--line)}
+table.t td{padding:7px 6px;border-bottom:1px dashed var(--line);vertical-align:middle}
+table.t td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tw{overflow-x:auto}
+.spark{width:110px;height:28px;display:block}
+.chip{display:inline-block;font-size:11px;padding:1px 7px;border-radius:6px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);margin-left:6px}
+.chip.sub{border-color:var(--warn)}.chip.un{border-color:var(--neg)}
+details{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:8px 0;background:var(--surface)}
+details summary{cursor:pointer;font-weight:600;font-size:14px;list-style:none;display:flex;justify-content:space-between;gap:8px;align-items:center}
+details summary::-webkit-details-marker{display:none}
+details summary .r{font-weight:400;color:var(--ink-2);font-size:13px;white-space:nowrap}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13.5px;margin-top:8px}.dl dt{color:var(--ink-3)}.dl dd{margin:0}
+.pp{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}@media (max-width:640px){.pp{grid-template-columns:1fr}}
+.pp div{background:var(--surface-2);border-radius:8px;padding:8px 10px;font-size:13px}.pp b{display:block;font-size:12px;margin-bottom:3px}
+.pp .t b{color:var(--neg)}.pp .l b{color:var(--pos)}
+.hist{width:100%;height:70px;display:block}
+.foot{font-size:12px;color:var(--ink-3);margin-top:20px}
+.err{background:color-mix(in srgb,var(--neg) 12%,var(--surface));border:1px solid var(--neg);padding:12px;border-radius:10px}
+.skel{color:var(--ink-3)}
+.glossary dt{font-weight:600;margin-top:8px}.glossary dd{margin:0;color:var(--ink-2);font-size:13.5px}
+.small{font-size:12.5px;color:var(--ink-3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46" fill="none" stroke="var(--line)" stroke-width="6"/><path d="M14 50 A36 36 0 0 1 86 50" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round"/><path d="M50 52 L68 30" stroke="var(--ink)" stroke-width="6" stroke-linecap="round"/><circle cx="50" cy="52" r="5" fill="var(--ink)"/></svg>
+    <div><h1>Global Liquidity Dashboard</h1><div class="sub">Single source of truth · updates itself from primary sources · <span id="upd">loading…</span></div></div>
+  </div>
+  <div class="pills">
+    <span class="pill" id="healthPill">data health…</span>
+    <div class="toggle" role="group" aria-label="Reading level"><button id="modePlain" class="on">Plain English</button><button id="modeExpert">Expert view</button></div>
+    <a class="pill" href="/api/data" target="_blank" rel="noopener">JSON</a>
+  </div>
+</header>
+
+<div id="app"><div class="card skel">Fetching live data from the Fed, Treasury, ECB, BIS, RBA, OFR and CBOE… (first load can take 10–20 seconds; later loads are cached)</div></div>
+
+<div class="foot">Built for David Cargill · Data are fetched live from the sources listed under Methodology and cached for six hours. Nothing on this page is typed in by hand. This is an information tool, not investment advice.</div>
+</div>
+
+<script>
+/* ---------------------------- static knowledge base (plain-English + expert) ---------------------------- */
+const IND = {
+ sofr_iorb:{what:'The gap between what banks pay to borrow cash overnight against Treasuries (SOFR) and what the Fed pays them to park cash (IORB).',why:'It is the purest read on whether there is enough cash in the US banking system. When SOFR sits above the Fed’s floor, banks are competing for cash — reserves have become scarce.',tight:'Spread rises above zero and stays there. Quarter-ends and tax dates spike it first.',loose:'Spread sits at or below zero; cash is plentiful and nobody needs to pay up.',expert:'This is the series the Fed itself watches for reserve ampleness. Treat a persistent +5–10bp as the first hard evidence of scarcity, and read the 99th-percentile SOFR trade against the median — dispersion widens before the median moves. Quarter-end prints are balance-sheet window-dressing (SLR, G-SIB) and should be read off a quarter average.'},
+ res_gdp:{what:'How much cash banks hold at the Fed, measured against the size of the US economy.',why:'The Fed’s own research shows repo markets start to strain when reserves fall below roughly 10% of GDP and are comfortable above 12%. It tells you how much buffer the system has before the plumbing seizes.',tight:'Ratio drops toward 10%. Below that, every Treasury auction pushes overnight rates around.',loose:'Ratio above 12% — the Fed could shrink its balance sheet without anyone noticing.',expert:'Level-scored rather than z-scored because the ratio trends structurally. The Fed ended QT in November 2025 and began reserve management purchases (bill buying) in December 2025 precisely because this ratio approached the threshold. Those purchases are not QE: they offset growth in currency and the Treasury account so reserves stay flat in real terms.'},
+ tga:{what:'How much the US Treasury has in its bank account at the Fed, and how fast it is changing.',why:'When the Treasury builds cash (tax receipts, debt issuance) that money leaves the banking system. When it spends, the money comes back. It moves liquidity around without the Fed doing anything.',tight:'Balance rising quickly — tax dates, or heavy bill issuance after a debt-ceiling resolution.',loose:'Balance falling — the Treasury is spending its cash into the economy.',expert:'The TGA is the biggest non-policy swing factor in US reserves. A $150bn four-week rebuild is roughly a quarter’s worth of the old QT pace. It is fully calendar-driven and reverses, so it should shift the tactical reading, not the regime reading.'},
+ srf:{what:'How much banks borrowed from the Fed’s emergency overnight lending window (the standing repo facility) in the last ten business days.',why:'Banks only use it when borrowing from the Fed is cheaper than borrowing in the market — which only happens when the market is short of cash.',tight:'Any sustained use. A quarter-end spike is normal; use on ordinary days is not.',loose:'Zero.',expert:'Level-scored: $0 = no stress; −2.5 at $62bn+. Use peaked at ~$75bn on 31 December 2025 and reverted to zero — a textbook year-end turn. Persistent mid-quarter use would mark the shift from “ample” to “scarce”.'},
+ hy_oas:{what:'The extra yield investors demand to lend to riskier US companies (junk bonds) over safe Treasuries. When FRED is not configured, the OFR credit-stress sub-index stands in.',why:'It is the price of credit for the companies most likely to be cut off first. Wide spreads mean lenders are nervous; tight spreads mean money is easy.',tight:'Spread widening — especially fast widening, which signals lenders pulling back rather than repricing.',loose:'Spread narrow and stable.',expert:'Option-adjusted spread, so no duration contamination (unlike HYG/IEF). Credit is downstream of plumbing: when funding stress and credit calm disagree, funding is usually right first. Wide spreads with calm funding is a growth problem, not a liquidity problem.'},
+ ccc_bb:{what:'The gap between the yield on the weakest junk borrowers (CCC) and the strongest junk borrowers (BB).',why:'The weakest borrowers lose access to money first. This gap widens before the headline spread does.',tight:'Gap widening while the headline spread is still calm — stress underneath the surface.',loose:'Gap narrowing — investors reaching for the riskiest paper.',expert:'The marginal-borrower spread. Watch it against VIX: low VIX with a widening CCC−BB is the classic “calm surface, stress underneath” setup that has led broader repricing in prior cycles.'},
+ fed_res_chg:{what:'How much the cash banks hold at the Fed has grown or shrunk over the past 13 weeks.',why:'It is the flow of US dollar liquidity — the change, not the level. Asset prices respond to the change in the rate of change.',tight:'Reserves shrinking (QT, or a rising Treasury balance, or reverse-repo rebuilding).',loose:'Reserves growing.',expert:'Since December 2025 reserves have been supported by reserve management purchases. Read this together with Reserves/GDP: growth from a low base is maintenance, not stimulus.'},
+ ecb_liq:{what:'How much cash euro-area banks hold at the ECB (deposit facility plus current accounts) and how it has changed over 13 weeks.',why:'It is the euro-area equivalent of Fed reserves. It has been shrinking as the ECB lets its pandemic bond holdings run off.',tight:'Balance falling — portfolio run-off, TLTRO repayment, government deposits rising.',loose:'Balance rising.',expert:'Use this, not total assets: run-off is mechanical and pre-announced, so total assets carry no news. This is excess liquidity plus required reserves (~€170bn); the growth rate is unaffected. Watch €STR against the deposit rate as the price signal.'},
+ rba_es:{what:'How much cash Australian banks hold at the Reserve Bank (Exchange Settlement balances) and how it has changed over 13 weeks.',why:'Australia is running down the cash created during the pandemic. The RBA estimates banks need A$70–100bn; the buffer above that is finite and the trajectory is known.',tight:'Balances falling toward A$100bn; the cash rate drifting up inside the RBA’s corridor.',loose:'Balances stable or rising.',expert:'Down from ~A$480bn in early 2023, declining A$20–40bn a year as the bond portfolio matures. The RBA runs a demand-driven system: ES rate 10bp below the cash-rate target, full-allotment OMO repo 10bp above. Rising OMO take-up and the cash rate drifting toward the OMO rate are the first hard evidence of scarcity — and a signal almost nobody else tracks.'},
+ boj_assets:{what:'The size of the Bank of Japan’s balance sheet and how it has changed over three months.',why:'The BoJ is the largest balance sheet relative to its economy and the source of the yen carry trade. When it shrinks — or the yen strengthens — global leverage funded in yen gets unwound.',tight:'Balance sheet shrinking as JGB purchases are tapered; yen appreciating.',loose:'Balance sheet stable or growing.',expert:'Transmits to global liquidity through the carry channel more than through domestic credit. A flat balance sheet with a sharply stronger yen is a global tightening event (August 2024). Read with USD/JPY.'},
+ m2:{what:'Growth in the broad money supply of the major economies, converted at fixed exchange rates so currency moves don’t distort it (US-only when partner series are unavailable).',why:'It is the slowest, deepest measure of liquidity — the amount of money that actually exists. It sets the regime; it does not time the trade.',tight:'Money growth below inflation, or turning negative on a three-month basis.',loose:'Money growth accelerating above inflation.',expert:'Constant-FX so a weak dollar cannot flatter it. Released with a 4–6 week lag, so it belongs in the regime layer, never in a weekly call. The “global M2 leads Bitcoin by 10–13 weeks” chart is over-fitted: rolling 4-year correlation is 0.4–0.6, the lag is unstable, and it broke in 2025 (M2 +12%, Bitcoin −12%). Use for regime, never for entry.'},
+ cn_money:{what:'Growth in China’s money supply over the past year — the free proxy for China’s credit impulse.',why:'China creates more money than anyone, but behind capital controls. It reaches the world through commodity demand and trade, not through global markets directly.',tight:'Money growth decelerating; the PBoC holding policy steady while credit demand is weak.',loose:'Money growth accelerating; RRR cuts, policy-rate cuts.',expert:'Total Social Financing (the credit impulse) is the better series but has no free machine-readable feed. China should be judged on DR007 versus the 7-day reverse-repo rate, daily OMO injections and RRR moves — not on the PBoC balance sheet, which barely reflects any of it.'},
+ vix:{what:'The market’s expectation of how much US stocks will move over the next month.',why:'When volatility rises, dealers and funds cut leverage, which withdraws liquidity from every market at once. Bond volatility (MOVE) is the better input but has no free feed.',tight:'VIX rising and staying high; a spike that does not mean-revert within days.',loose:'VIX low and stable.',expert:'VIX is a consequence, not a cause, and is structurally suppressed by vol-selling flows and 0DTE options, so its level is not comparable to its own history. MOVE is what drives dealer VaR and repo haircuts. If you have a terminal, swap it in.'},
+ usd:{what:'How much the US dollar has moved against a trade-weighted basket of 60+ currencies over 13 weeks.',why:'Most of the world’s cross-border debt is in dollars. A stronger dollar makes every foreign borrower’s debt heavier and pulls dollars out of emerging markets — a global tightening that shows up nowhere in US data.',tight:'Dollar rising sharply.',loose:'Dollar falling.',expert:'BIS broad nominal effective rate, not DXY (which is 58% euro with no EM). Watch for the double-count: a weak dollar also inflates market-FX global M2. Cross-currency basis would be the direct measure of offshore dollar scarcity; it needs a terminal.'},
+};
+const BLOCK_TXT = {
+ plumbing:{plain:'The pipes. Is there enough cash in the banking system, and what does it cost to borrow it overnight? This is where liquidity is created and destroyed — everything else reacts to it.',expert:'35% weight. Cross-currency basis and FRA–OIS would complete this block; both need a paid terminal, so the block runs on SOFR–IORB, reserves/GDP, the Treasury account and standing-repo use.'},
+ credit:{plain:'The lenders. How nervous are the people who lend to companies? Wide spreads mean money is getting harder to get for the riskiest borrowers.',expert:'25% weight. HY OAS plus the CCC–BB marginal-borrower gap. Credit is the fastest reliable transmission from funding conditions to the real economy.'},
+ balance:{plain:'The central banks. Are the Fed, ECB, RBA and BoJ adding cash to their banking systems or draining it? Measured as the change over 13 weeks, because markets respond to the change, not the level.',expert:'20% weight. Fed 8, ECB 6, RBA 3, BoJ 3. Flow, not stock. The Fed’s reserve management purchases show up here as growth — see the Tensions panel for why that is not stimulus.'},
+ money:{plain:'The money supply. How fast is the total amount of money in the big economies growing? Slow-moving and lagged — it tells you what regime you are in, not what happens this week.',expert:'10% weight. Global M2 at constant FX (or US M2 when partners are unavailable) and China M2 as the credit-impulse proxy. Monthly with a 4–6 week lag; a regime variable.'},
+ volfx:{plain:'Fear and the dollar. When markets get volatile, everyone cuts risk at once; when the dollar strengthens, the whole world’s dollar debts get heavier.',expert:'10% weight. VIX (MOVE preferred) and the BIS broad dollar. Both are consequences as much as causes, hence the small weight.'},
+};
+const REG = {
+ us:{how:'The US is the source of the world’s reserve currency, so US liquidity is global liquidity. It is created by the Fed (reserves), moved around by the Treasury (its cash account), priced overnight in the repo market (SOFR), and transmitted through credit spreads and the dollar.',watch:'SOFR against the Fed’s floor rate; reserves as a share of GDP against the 10%/12% thresholds; the monthly reserve-management-purchase schedule; the Treasury cash balance around tax dates and quarter-ends.',global:'Dominant. Every other panel on this page ultimately trades against dollar conditions.',expert:'QT ended November 2025; reserve management purchases (bill buying) began December 2025; overnight reverse repo has drained to zero. The classic “Fed assets − TGA − RRP” net-liquidity formula has lost one of its three moving parts and now mostly re-plots the balance sheet. The replacements are reserves/GDP, SOFR–IORB and standing-repo use.'},
+ au:{how:'Australian banks hold cash at the RBA (Exchange Settlement balances). The RBA sets a cash-rate target with a 20bp corridor: it pays 10bp below target on ES balances and lends at 10bp above through weekly full-allotment repo. As pandemic-era bond holdings mature, ES balances fall by A$20–40bn a year.',watch:'ES balances versus the RBA’s A$70–100bn “ample” estimate; OMO repo take-up; the actual cash rate drifting up inside the corridor; the 3-month bank bill rate against the cash rate.',global:'Small directly, but Australia is a clean laboratory for the transition from “abundant” to “ample” reserves — the same transition the Fed is managing.',expert:'ES balances fell from ~A$480bn (early 2023) to ~A$200bn (August 2026). The RBA has said the level of reserves is not yet demand-driven. A persistent drift of the cash rate toward the OMO rate is the first tradeable signal that scarcity has arrived — and it is published weekly, free, and on nobody else’s dashboard.'},
+ eu:{how:'Euro-area banks hold cash at the Eurosystem in current accounts and the deposit facility. The ECB has been letting its bond portfolios run off, so that cash is shrinking mechanically. Overnight money is priced by €STR against the deposit rate.',watch:'Deposit facility plus current accounts (the liquidity stock) and its 13-week change; €STR minus the deposit rate; central-government deposits at the Eurosystem (a drain when they rise, like the US Treasury account).',global:'Second-largest funding market; the euro is the main counterpart in dollar cross-currency basis, so euro-area bank stress shows up as dollar scarcity worldwide.',expert:'Use excess liquidity, never total assets: run-off is pre-announced and carries no information. The binding constraint will appear first in €STR trading above the deposit rate and in repo specialness on German collateral.'},
+ gb:{how:'The Bank of England sets Bank Rate and has been actively selling gilts (unusually mechanical QT). Sterling money markets price off Bank Rate; reserves are supplied on demand through the Short-Term Repo facility.',watch:'Bank Rate path; gilt-sale pace; sterling’s effective exchange rate; the OFR “other advanced economies” stress read.',global:'Modest directly, but gilt-market dislocations (September 2022) have shown how fast a mid-sized bond market can transmit to global rates and collateral.',expert:'BoE QT is pre-announced and therefore carries little surprise. The transmission to watch is collateral: gilt repo and pension-fund liability-driven strategies.'},
+ jp:{how:'The Bank of Japan holds the world’s largest balance sheet relative to GDP and has been tapering its bond purchases. Japanese savers fund global leverage cheaply — the yen carry trade — so BoJ policy and the yen move global liquidity, not just Japanese liquidity.',watch:'BoJ total assets (3-month change); the policy rate; the yen’s effective exchange rate — a sharp yen rally is a global deleveraging event.',global:'Large through the carry channel. August 2024 showed a 10% yen move unwinding leverage across every asset class within days.',expert:'A flat balance sheet with an appreciating yen is a global tightening. Read the BoJ panel alongside the Vol & dollar block, not in isolation.'},
+ cn:{how:'China creates money through its bank-credit system behind capital controls. The PBoC does not do QE; it manages liquidity through the reserve requirement ratio, medium-term lending, daily open-market reverse repos and window guidance. Its balance sheet barely reflects any of it.',watch:'M2 growth (the free proxy for the credit impulse); the 7-day policy rate; the yuan’s effective rate. If you have terminal access: DR007 minus the 7-day reverse-repo rate, daily OMO net injections, Total Social Financing.',global:'Very large, but indirect — through commodity demand, trade and the yuan, not through global funding markets.',expert:'Do not use the PBoC balance sheet as a liquidity gauge. Total Social Financing (the credit impulse) is what transmits; China M2 is the best free proxy. China is ~40% of naive global M2, which is why this dashboard keeps it as a separate reading rather than blending it into the headline.'},
+ in:{how:'The Reserve Bank of India manages banking-system liquidity through its repo rate, variable-rate repo/reverse-repo auctions and FX intervention. Rupee stability is a first-order policy objective, so dollar conditions bind quickly.',watch:'Policy rate direction; the rupee’s effective exchange rate; the EM stress sub-index.',global:'Growing. India is now a major destination for global portfolio flows, so its liquidity is increasingly a function of the dollar.',expert:'The RBI’s daily liquidity adjustment facility balance (system surplus/deficit) is the local plumbing series; it needs a terminal or RBI scraping. Coverage here is policy rate + FX + regional stress.'},
+ kr:{how:'The Bank of Korea sets the base rate; Korea is a highly open, trade-dependent economy with deep won-dollar linkages. Liquidity conditions track the dollar and global tech demand closely.',watch:'Base rate; the won’s effective rate; EM stress.',global:'A bellwether for Asian export liquidity and the semiconductor cycle.',expert:'Korea is classified as emerging by MSCI and is shown against the OFR emerging-markets sub-index. Won weakness is the fastest tell of Asian dollar scarcity.'},
+ tw:{how:'Taiwan’s central bank manages a very large external surplus and intervenes heavily; liquidity is abundant domestically and the Taiwan dollar is tightly managed. Global relevance runs through the semiconductor supply chain and life-insurer dollar hedging.',watch:'The Taiwan dollar’s effective rate (BIS); EM stress. BIS does not publish a daily policy rate for Taiwan, so coverage is limited.',global:'Meaningful through insurers’ dollar hedging flows and chip demand.',expert:'Taiwanese life insurers are among the largest holders of US corporate bonds; their hedge ratios move the cross-currency basis. Coverage here is limited to FX and regional stress.'},
+ nz:{how:'The Reserve Bank of New Zealand sets the Official Cash Rate. A small, open economy whose liquidity tracks Australia and the dollar closely.',watch:'OCR direction; the NZ dollar’s effective rate.',global:'Small; useful mainly as a cross-check on the Australian read.',expert:'The RBNZ moves earlier and harder than most peers; its rate path has often led the RBA’s by a quarter or two.'},
+ ca:{how:'The Bank of Canada sets the overnight target and runs a floor system. Canadian liquidity is tightly linked to the US through trade, banking and the dollar.',watch:'Policy rate; the Canadian dollar’s effective rate; other-advanced stress.',global:'Modest; moves with US conditions.',expert:'The BoC ended QT and resumed reserve-management purchases before the Fed did — a useful preview of the Fed’s playbook.'},
+ br:{how:'The Central Bank of Brazil runs one of the highest real policy rates in the world; liquidity is driven by the Selic rate, the real, and global dollar conditions.',watch:'Selic direction; the real’s effective rate; EM stress.',global:'A bellwether for EM carry trades and commodity-linked liquidity.',expert:'Brazil’s real rate makes it the canonical EM carry destination; when the dollar strengthens sharply, the real is where the unwind shows first.'},
+ mx:{how:'Banxico sets the overnight rate; Mexico’s liquidity is bound to US conditions through trade, remittances and nearshoring flows.',watch:'Policy rate; the peso’s effective rate; EM stress.',global:'Rising with nearshoring; the peso is the most liquid EM currency and a proxy for EM risk appetite.',expert:'Peso positioning is heavily leveraged; it is one of the first casualties of a VIX spike.'},
+ za:{how:'The South African Reserve Bank sets the repo rate; the rand is a high-beta proxy for global risk appetite and commodity demand.',watch:'Repo rate; the rand’s effective rate; EM stress.',global:'Small in size, large as a signal — the rand is often the first EM currency to move.',expert:'South Africa is the only African market with free daily policy-rate and effective-exchange-rate data; it stands in for the continent here.'},
+ ru:{how:'The Bank of Russia sets the key rate. Since 2022 sanctions, Russia is cut off from dollar funding markets; domestic liquidity is administered and data are limited.',watch:'Key rate direction (BIS). No reliable free exchange-rate feed is available.',global:'Negligible for global funding markets since 2022; relevant mainly through commodities.',expert:'Treat all Russian data with caution; the coverage here is deliberately limited to the BIS-reported policy rate.'},
+ asiax:{how:'An average of the Japan, Korea, Taiwan and India readings.',watch:'The yen (carry) and the won (dollar scarcity) lead; India and Taiwan follow.',global:'Asia ex-China is where dollar tightening bites first in EM.',expert:'Aggregate of member scores, equal-weighted.'},
+ latam:{how:'An average of the Brazil and Mexico readings.',watch:'The real and the peso against the dollar; both central banks’ easing cycles.',global:'The canonical EM carry region.',expert:'Aggregate of member scores, equal-weighted.'},
+};
+const GLOSS = [
+ ['Liquidity','How easy and cheap it is to get money. “Abundant” means cash is plentiful and lenders are relaxed; “stressed” means cash is scarce and lenders are pulling back.'],
+ ['Reserves','Cash that commercial banks hold in their accounts at the central bank. The central bank creates it; the amount determines how comfortable the whole system is.'],
+ ['SOFR','Secured Overnight Financing Rate — what it costs to borrow cash overnight against US Treasuries. The main US money-market rate.'],
+ ['IORB','Interest on Reserve Balances — what the Fed pays banks on the cash they hold at the Fed. Acts as the floor for overnight rates.'],
+ ['Repo','A loan of cash against bonds as collateral, usually overnight. The plumbing of the financial system runs on repo.'],
+ ['Standing repo facility','The Fed’s window where banks can borrow cash against Treasuries at a penalty rate. Used only when the market is short of cash.'],
+ ['TGA','Treasury General Account — the US government’s bank account at the Fed. When it fills up, cash leaves the banking system.'],
+ ['Credit spread / OAS','The extra yield a risky borrower pays over a safe one. Wider = lenders more nervous.'],
+ ['QT / QE','Quantitative tightening (the central bank shrinks its balance sheet, draining cash) and quantitative easing (it expands it, adding cash).'],
+ ['Reserve management purchases','Fed bill purchases that keep reserves roughly stable as other liabilities grow. Not QE — they stop liquidity falling rather than adding it.'],
+ ['Z-score','How unusual today’s reading is compared with its own recent history, in standard deviations. +2 means “higher than about 98% of the last two years”.'],
+ ['Composite','The single number on the dial: a weighted average of every indicator’s z-score, each signed so that positive always means easier money.'],
+ ['Effective exchange rate','A currency measured against a trade-weighted basket of its partners rather than against one other currency.'],
+ ['Carry trade','Borrowing in a low-rate currency (typically yen) to invest elsewhere. Unwinds violently when the funding currency strengthens.'],
+];
+const BANDS = [['Stressed','c-stressed',-3,-1],['Tightening','c-tight',-1,-0.5],['Neutral','c-neutral',-0.5,0.5],['Easing','c-easing',0.5,1],['Abundant','c-abundant',1,3]];
+const bandColor = b => ({Stressed:'var(--c-stressed)',Tightening:'var(--c-tight)',Neutral:'var(--c-neutral)',Easing:'var(--c-easing)',Abundant:'var(--c-abundant)'})[b] || 'var(--ink-3)';
+const bandOf = v => v==null?'No reading':v>1?'Abundant':v>0.5?'Easing':v>=-0.5?'Neutral':v>=-1?'Tightening':'Stressed';
+
+/* ---------------------------- rendering helpers ---------------------------- */
+const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = (v,u) => v==null?'—':(u==='%'||u==='bp')?`${v}${u}`:u==='score'?`${v>0?'+':''}${v}`:`${v}${u?' '+u:''}`;
+const sgn = v => v==null?'—':`${v>0?'+':''}${v}`;
+function dial(v, size=420, label=true){ // semicircular gauge, −2.5..+2.5
+  const W=size,H=size*0.66,cx=W/2,cy=H-size*0.12,R=W*0.42,r=W*0.31; const clampv=x=>Math.max(-2.5,Math.min(2.5,x));
+  const ang=x=>Math.PI-(clampv(x)+2.5)/5*Math.PI; const pt=(a,rad)=>[cx+rad*Math.cos(a),cy-rad*Math.sin(a)];
+  const arc=(a0,a1,cls)=>{const [x0,y0]=pt(a0,R),[x1,y1]=pt(a1,R),[x2,y2]=pt(a1,r),[x3,y3]=pt(a0,r);return `<path d="M${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1} L${x2} ${y2} A${r} ${r} 0 0 0 ${x3} ${y3} Z" fill="var(--${cls})" opacity="${v==null?0.35:1}"/>`;};
+  let s=`<svg class="dial" viewBox="0 0 ${W} ${H}" role="img" aria-label="Liquidity dial reading ${v==null?'no reading':v}">`;
+  for(const [n,c,lo,hi] of BANDS){ s+=arc(ang(Math.max(lo,-2.5)),ang(Math.min(hi,2.5)),c); }
+  if(label){ for(const [n,c,lo,hi] of BANDS){ const m=ang((Math.max(lo,-2.5)+Math.min(hi,2.5))/2); const [tx,ty]=pt(m,R+size*0.045); s+=`<text x="${tx}" y="${ty}" text-anchor="middle" font-size="${size*0.028}" fill="var(--ink-2)">${n}</text>`; }
+    for(const t of [-2.5,-1,-0.5,0.5,1,2.5]){ const [tx,ty]=pt(ang(t),r-size*0.03); s+=`<text x="${tx}" y="${ty+4}" text-anchor="middle" font-size="${size*0.024}" fill="var(--ink-3)">${t>0?'+':''}${t}</text>`; } }
+  if(v!=null){ const a=ang(v); const [nx,ny]=pt(a,R*0.98); const [bx1,by1]=pt(a+Math.PI/2,size*0.018),[bx2,by2]=pt(a-Math.PI/2,size*0.018);
+    s+=`<path d="M${bx1} ${by1} L${nx} ${ny} L${bx2} ${by2} Z" fill="var(--ink)"/><circle cx="${cx}" cy="${cy}" r="${size*0.03}" fill="var(--ink)"/>`;
+    s+=`<text x="${cx}" y="${cy+size*0.075}" text-anchor="middle" font-size="${size*0.07}" font-weight="700" fill="var(--ink)">${v>0?'+':''}${v.toFixed(2)}</text>`; }
+  else s+=`<text x="${cx}" y="${cy+size*0.075}" text-anchor="middle" font-size="${size*0.04}" fill="var(--ink-3)">no reading</text>`;
+  return s+'</svg>';
+}
+function spark(series, w=110, h=28, color='var(--accent)', zero=false){ if(!series||series.length<2) return ''; const xs=series.map((p,i)=>i), ys=series.map(p=>p.v); const mn=Math.min(...ys,zero?0:Infinity), mx=Math.max(...ys,zero?0:-Infinity); const X=i=>2+(w-4)*i/(xs.length-1), Y=v=>mx===mn?h/2:2+(h-4)*(1-(v-mn)/(mx-mn));
+  let d=series.map((p,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(p.v).toFixed(1)}`).join(' '); let z=zero&&mn<0&&mx>0?`<line x1="0" x2="${w}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--ink-3)" stroke-dasharray="2 2" opacity=".6"/>`:'';
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${z}<path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round"/><circle cx="${X(xs.length-1)}" cy="${Y(ys[ys.length-1])}" r="2.2" fill="${color}"/></svg>`; }
+function meter(score){ const idx=score==null?-1:score<-1?0:score<-0.5?1:score<=0.5?2:score<=1?3:4; return `<span class="meter" aria-hidden="true">${BANDS.map((b,i)=>`<i class="${i===idx?'on':''}" style="${i===idx?'background:var(--'+b[1]+')':''}"></i>`).join('')}</span>`; }
+function histChart(hist){ if(!hist||hist.length<3) return ''; const w=600,h=70,ys=hist.map(p=>p.v); const mn=Math.min(-1.2,...ys),mx=Math.max(1.2,...ys); const X=i=>4+(w-8)*i/(hist.length-1),Y=v=>4+(h-8)*(1-(v-mn)/(mx-mn));
+  const bandsSvg=BANDS.map(([n,c,lo,hi])=>{const y0=Y(Math.min(hi,mx)),y1=Y(Math.max(lo,mn)); if(y1<=y0) return ''; return `<rect x="0" y="${y0}" width="${w}" height="${y1-y0}" fill="var(--${c})" opacity=".12"/>`;}).join('');
+  const d=hist.map((p,i)=>`${i?'L':'M'}${X(i).toFixed(1)} ${Y(p.v).toFixed(1)}`).join(' ');
+  return `<svg class="hist" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="Composite over the last 52 weeks">${bandsSvg}<line x1="0" x2="${w}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--ink-3)" stroke-dasharray="3 3" opacity=".6"/><path d="${d}" fill="none" stroke="var(--ink)" stroke-width="2"/><circle cx="${X(hist.length-1)}" cy="${Y(ys[ys.length-1])}" r="3.5" fill="var(--ink)"/></svg>`; }
+const statusChip = x => x.status==='ok'?'':x.status==='substituted'?'<span class="chip sub">substitute</span>':'<span class="chip un">unavailable</span>';
+
+/* ---------------------------- page ---------------------------- */
+let DATA=null, selRegion='us';
+async function load(){ try{ const r=await fetch('/api/data'); if(!r.ok) throw new Error('HTTP '+r.status); DATA=await r.json(); if(DATA.error) throw new Error(DATA.error); render(); }catch(e){ document.getElementById('app').innerHTML=`<div class="card err"><b>Could not load data.</b><br>${esc(e.message)}<br><span class="small">Sources may be slow on a first load; try again in a minute. If it persists, open <a href="/api/data?fresh=1">/api/data?fresh=1</a> to see the raw error.</span></div>`; } }
+function render(){
+  const d=DATA, c=d.composite; const gen=new Date(d.generatedAt);
+  document.getElementById('upd').textContent=`data as of ${gen.toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})}`;
+  const hp=document.getElementById('healthPill'); const dh=d.dataHealth; hp.textContent=`${dh.sourcesOk}/${dh.sourcesTotal} sources live · composite on ${dh.compositeCoverage}% of weight${d.fredConfigured?'':' · FRED key not set'}`; hp.className='pill '+(dh.compositeCoverage>=90?'ok':dh.compositeCoverage>=55?'warn':'bad');
+  const cm=d.commentary; const live=d.indicators.filter(i=>i.contribution!=null);
+  let h='';
+  /* hero */
+  h+=`<section class="card"><div class="hero"><div>${dial(c.value)}</div><div>
+    <p class="headline">Liquidity is <span class="band" style="background:${bandColor(c.band)}">${esc(c.band)}</span></p>
+    <p class="plain">${esc(cm.plain)}</p>
+    <p class="trend">${esc(cm.headline)}${c.chg13w!=null?` Thirteen-week change: ${sgn(c.chg13w)}.`:''}</p>
+    <div class="kpis"><div class="kpi"><div class="l">Composite</div><div class="v">${c.value==null?'—':sgn(c.value)}</div></div><div class="kpi"><div class="l">4-week change</div><div class="v" style="color:${c.chg4w>0?'var(--pos)':c.chg4w<0?'var(--neg)':'inherit'}">${sgn(c.chg4w)}</div></div><div class="kpi"><div class="l">Inputs live</div><div class="v">${live.length}/${d.indicators.length}</div></div><div class="kpi"><div class="l">Weight covered</div><div class="v">${c.liveWeight}%</div></div></div>
+    <div class="expert"><b>Reading the number.</b> Composite = Σ(weight × signed z-score) ÷ Σ(live weights), z clamped at ±3, positive = easier money. Bands: &gt;+1 abundant · +0.5–1 easing · ±0.5 neutral · −0.5 to −1 tightening · &lt;−1 stressed. Weights: plumbing 35 · credit 25 · balance sheets 20 · money 10 · vol &amp; dollar 10.</div>
+  </div></div>
+  <h3 style="margin-top:16px">Last 52 weeks</h3>${histChart(c.history)}<div class="small">Weekly recomputation of the composite using the same rules at each past date. Shaded bands match the dial.</div>
+  <details style="margin-top:12px"><summary>How to read this dial <span class="r">what the five settings mean</span></summary>
+   <div class="explain"><p><b style="color:var(--c-abundant)">Abundant (above +1).</b> Cash is plentiful and cheap everywhere. The best backdrop for risk assets — and the one in which excess quietly builds.</p><p><b style="color:var(--c-easing)">Easing (+0.5 to +1).</b> Conditions are loosening. More money is entering the system than leaving it.</p><p><b style="color:var(--c-neutral)">Neutral (−0.5 to +0.5).</b> Liquidity is not the driver. Look to earnings, valuation and positioning instead.</p><p><b style="color:var(--c-tight)">Tightening (−0.5 to −1).</b> Money is getting harder to get. Leverage gets cut; the weakest borrowers struggle first.</p><p><b style="color:var(--c-stressed)">Stressed (below −1).</b> Funding markets are the story. Correlations go to one.</p><p>The needle moves with the <em>weighted average</em> of fourteen indicators. Each is compared with its own recent history (a z-score), flipped so that positive always means easier money, and weighted by how directly it measures the availability of cash. The “What’s pushing and pulling” panel below shows exactly which indicators moved the needle and by how much.</p></div></details>
+  </section>`;
+  /* tug of war */
+  h+=`<section class="card"><h2>What’s pushing and pulling the needle</h2><p class="lede">Each bar is one indicator’s contribution to the composite (weight × score). Bars to the right push toward <b style="color:var(--pos)">easier</b> money; bars to the left toward <b style="color:var(--neg)">tighter</b>. Grouped by the layer of the system they measure.</p>
+   <div class="grid2"><div><b style="font-size:13px;color:var(--pos)">Pulling looser</b><ol style="margin:4px 0 0 18px;padding:0;font-size:13.5px">${cm.drivers.loosening.map(x=>`<li>${esc(x.text)}</li>`).join('')||'<li class="small">none</li>'}</ol></div><div><b style="font-size:13px;color:var(--neg)">Pulling tighter</b><ol style="margin:4px 0 0 18px;padding:0;font-size:13.5px">${cm.drivers.tightening.map(x=>`<li>${esc(x.text)}</li>`).join('')||'<li class="small">none</li>'}</ol></div></div>`;
+  const maxC=Math.max(0.15,...live.map(i=>Math.abs(i.contribution)));
+  for(const b of d.blocks){ const bt=BLOCK_TXT[b.id]; h+=`<div class="blockhead"><b>${esc(b.name)} <span class="small">(${b.weight}% weight${b.liveWeight<b.weight?`, ${b.liveWeight}% live`:''})</span></b><span class="bs">block score ${b.score==null?'—':sgn(b.score)} · ${esc(b.band)}${meter(b.score)}</span></div><div class="explain">${esc(bt.plain)}</div><div class="expert">${esc(bt.expert)}</div><div class="tug">`;
+    for(const id of b.inputs){ const x=d.indicators.find(i=>i.id===id); const w=x.contribution==null?0:Math.min(50,Math.abs(x.contribution)/maxC*50);
+      h+=`<div class="row"><div class="name">${esc(x.name)}${statusChip(x)}<small>${x.status==='unavailable'?esc(x.note||''):`${fmt(x.value,x.unit)}${x.asOf?' · '+x.asOf:''}${x.chg4w!=null?' · 4w '+sgn(x.chg4w):''}`}</small></div><div class="bar"><div class="mid"></div>${x.contribution==null?'':`<div class="fill ${x.contribution>=0?'pos':'neg'}" style="width:${w}%"></div>`}</div><div class="val">${x.signed==null?'—':`score ${sgn(x.signed)}<br><span class="small">contrib ${sgn(x.contribution)}</span>`}</div></div>`; }
+    h+='</div>'; }
+  h+='</section>';
+  /* tensions */
+  h+=`<section class="card"><h2>Tensions and trade-offs</h2><p class="lede">Where the indicators disagree, and what an expert would make of it. These fire only when the data say so.</p><div class="tensions">${cm.tensions.map(t=>`<div class="tension"><b>${esc(t.title)}</b><p>${esc(t.body)}</p></div>`).join('')}</div></section>`;
+  /* regions */
+  h+=`<section class="card"><h2>Markets</h2><p class="lede">Overall view above; pick a market to see what drives liquidity there, what to watch, and the live inputs. Coverage badge shows how much free primary data exists for that market.</p><div class="regions" id="regions">`;
+  for(const r of d.regions) h+=`<div class="rcard ${r.id===selRegion?'sel':''}" data-id="${r.id}"><div class="n">${esc(r.name)}</div><div class="b" style="color:${bandColor(r.band)}">${esc(r.band)} ${r.score==null?'':'('+sgn(r.score)+')'}${meter(r.score)}</div><div class="cov">coverage: ${esc(r.coverage)}</div></div>`;
+  h+=`</div><div class="rdetail" id="rdetail"></div></section>`;
+  /* indicator details */
+  h+=`<section class="card"><h2>Indicator guide</h2><p class="lede">What each input is, why it matters, and what pushes it each way. Switch to <b>Expert view</b> (top right) for the nuance.</p>`;
+  for(const x of d.indicators){ const k=IND[x.id]||{}; h+=`<details><summary><span>${esc(x.name)}${statusChip(x)}</span><span class="r">${x.status==='unavailable'?'no data':`${fmt(x.value,x.unit)} · score ${sgn(x.signed)}`}</span></summary>
+    <div class="dl"><dt>What it is</dt><dd>${esc(k.what||'')}</dd><dt>Why it matters</dt><dd>${esc(k.why||'')}</dd><dt>Now</dt><dd>${x.status==='unavailable'?esc(x.note||'unavailable'):`${fmt(x.value,x.unit)} as of ${x.asOf||'—'}${x.level!=null?` · level ${x.level}${x.levelUnit?' '+x.levelUnit:''}`:''}${x.chg4w!=null?` · 4-week change ${sgn(x.chg4w)}`:''} · z ${sgn(x.z)} · signed score ${sgn(x.signed)} · weight ${x.weight}%`}${x.scoreMethod?`<br><span class="small">${esc(x.scoreMethod)}</span>`:''}${x.note&&x.status!=='unavailable'?`<br><span class="small">${esc(x.note)}</span>`:''}</dd>${x.series&&x.series.length>2?`<dt>Trend</dt><dd>${spark(x.series,320,48)}</dd>`:''}</div>
+    <div class="pp"><div class="t"><b>Pushes toward tight</b>${esc(k.tight||'')}</div><div class="l"><b>Pushes toward loose</b>${esc(k.loose||'')}</div></div><div class="expert">${esc(k.expert||'')}</div></details>`; }
+  h+='</section>';
+  /* methodology, sources, health, glossary */
+  h+=`<section class="card"><h2>Methodology, sources and data health</h2>
+   <div class="explain"><p>${esc(d.method.note)}</p><p>Z-score windows: ${esc(d.method.zWindows)}. Clamp: ${esc(d.method.clamp)}.</p></div>
+   <div class="expert"><b>Why these weights.</b> Funding plumbing measures availability directly and gets the largest weight. Credit is the fastest reliable transmission channel. Balance-sheet <em>flow</em> matters more than the level. Money supply sets the regime but is slow and lagged. Volatility and the dollar are as much consequence as cause. Weights are fixed; if you find yourself re-weighting after a bad call you have built a curve-fitting device, not an indicator.</div>
+   <h3>Sources</h3><div class="tw"><table class="t"><tr><th>Source</th><th>What</th><th>Cadence</th></tr>${d.sources.map(s=>`<tr><td><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.name)}</a>${s.requires?` <span class="chip ${d.fredConfigured?'':'un'}">${d.fredConfigured?'configured':'needs '+esc(s.requires)}</span>`:''}</td><td>${esc(s.what)}</td><td>${esc(s.cadence)}</td></tr>`).join('')}</table></div>
+   <h3>Data health <span class="small">(this load)</span></h3><div class="tw"><table class="t"><tr><th>Feed</th><th>Status</th><th>Obs</th><th>Latest</th><th>Note</th></tr>${Object.entries(dh.series).map(([k,s])=>`<tr><td>${esc(s.name||k)}</td><td style="color:${s.status==='ok'?'var(--pos)':s.status==='not_configured'?'var(--warn)':'var(--neg)'}">${esc(s.status)}</td><td class="num">${s.obs??''}</td><td class="num">${s.lastDate||''}${s.staleDays!=null?` (${s.staleDays}d)`:''}</td><td class="small">${esc(s.error||'')}</td></tr>`).join('')}</table></div>
+   <p class="small">Generated ${esc(d.generatedAt)} in ${d.buildMs} ms. Responses are cached at the edge for six hours and refreshed by a scheduled job every six hours. Append <code>?fresh=1</code> to the JSON URL to bypass the cache.</p>
+   <h3>Glossary</h3><dl class="glossary">${GLOSS.map(([t,x])=>`<dt>${esc(t)}</dt><dd>${esc(x)}</dd>`).join('')}</dl>
+  </section>`;
+  document.getElementById('app').innerHTML=h;
+  document.querySelectorAll('.rcard').forEach(el=>el.addEventListener('click',()=>{selRegion=el.dataset.id;document.querySelectorAll('.rcard').forEach(e=>e.classList.toggle('sel',e.dataset.id===selRegion));renderRegion();document.getElementById('rdetail').scrollIntoView({behavior:'smooth',block:'nearest'});}));
+  renderRegion();
+}
+function renderRegion(){ const r=DATA.regions.find(x=>x.id===selRegion); if(!r) return; const k=REG[r.id]||{}; const note=(DATA.commentary.regionNotes.find(n=>n.id===r.id)||{}).text;
+  let h=`<div class="rhead"><div style="width:180px">${dial(r.score,180,false)}</div><div style="flex:1;min-width:240px"><div style="font-size:20px;font-weight:700">${esc(r.name)} — <span style="color:${bandColor(r.band)}">${esc(r.band)}</span> ${r.score==null?'':'('+sgn(r.score)+')'}</div><div class="small">Coverage: ${esc(r.coverage)} · group: ${esc(r.group)}</div>${note?`<p class="explain" style="margin:6px 0 0">${esc(note)}</p>`:''}</div></div>
+   <div class="grid2" style="margin-top:12px"><div><h3>How liquidity works here</h3><div class="explain">${esc(k.how||'')}</div></div><div><h3>What to watch</h3><div class="explain">${esc(k.watch||'')}</div><h3>Why it matters globally</h3><div class="explain">${esc(k.global||'')}</div></div></div><div class="expert">${esc(k.expert||'')}</div>
+   <h3>Live inputs</h3><div class="tw"><table class="t"><tr><th>Input</th><th class="num">Value</th><th class="num">Change</th><th class="num">Score</th><th class="num">Weight</th><th>Trend</th><th>Source</th></tr>`;
+  for(const p of r.inputs){ const ch=p.chg6m!=null?`6m ${sgn(p.chg6m)}`:p.chg13w!=null?`13w ${sgn(p.chg13w)}%`:p.chg4w!=null?`4w ${sgn(p.chg4w)}`:'—';
+    h+=`<tr><td>${esc(p.k)}${p.asOf?`<br><span class="small">${p.asOf}</span>`:''}</td><td class="num">${fmt(p.v,p.unit)}${p.level!=null&&p.unit!=='score'?`<br><span class="small">level ${p.level}</span>`:''}</td><td class="num">${ch}</td><td class="num" style="color:${p.score>0?'var(--pos)':p.score<0?'var(--neg)':'inherit'}">${p.score==null?'—':sgn(p.score)}</td><td class="num">${p.w||'—'}</td><td>${p.series?spark(p.series,110,28,'var(--accent)',false):''}</td><td class="small">${esc(p.src||'')}</td></tr>`; }
+  h+='</table></div><p class="small">Regional score = weighted average of input scores (policy-rate 6-month change: 100bp of hikes ≈ −2; effective exchange rate 13-week change: +6% ≈ +2; OFR regional stress z-score, inverted; plus market-specific inputs). Inputs with weight 0 are shown for context only.</p>';
+  document.getElementById('rdetail').innerHTML=h; }
+document.getElementById('modePlain').onclick=()=>{document.body.classList.remove('expert');document.getElementById('modePlain').classList.add('on');document.getElementById('modeExpert').classList.remove('on');try{localStorage.setItem('liq-mode','plain')}catch(e){}};
+document.getElementById('modeExpert').onclick=()=>{document.body.classList.add('expert');document.getElementById('modeExpert').classList.add('on');document.getElementById('modePlain').classList.remove('on');try{localStorage.setItem('liq-mode','expert')}catch(e){}};
+try{ if(localStorage.getItem('liq-mode')==='expert') document.getElementById('modeExpert').click(); }catch(e){}
+load();
+</script>
+</body>
+</html>
