@@ -119,11 +119,13 @@ const SOURCES = {
 };
 const FRED_SERIES = { WRESBAL: 'Reserve balances', GDP: 'US nominal GDP', IORB: 'Interest on reserve balances', HY: 'BAMLH0A0HYM2', CCC: 'BAMLH0A3HYC', BB: 'BAMLH0A1HYBB', IG: 'BAMLC0A0CM', JPNASSETS: 'BoJ total assets', M2SL: 'US M2', MYAGM2CNM189N: 'China M2', MYAGM2JPM189N: 'Japan M2', MYAGM2GBM189N: 'UK M2', MYAGM3EZM196N: 'Euro area M3', WALCL: 'Fed total assets', RRPONTSYD: 'ON RRP', DTWEXBGS: 'Broad dollar', DGS2: 'US 2y', DEXUSEU: 'EUR/USD', DEXJPUS: 'USD/JPY', DEXCHUS: 'USD/CNY', DEXUSUK: 'GBP/USD' };
 const FRED_IDS = { WRESBAL: 'WRESBAL', GDP: 'GDP', IORB: 'IORB', HY: 'BAMLH0A0HYM2', CCC: 'BAMLH0A3HYC', BB: 'BAMLH0A1HYBB', IG: 'BAMLC0A0CM', JPNASSETS: 'JPNASSETS', M2SL: 'M2SL', M2CN: 'MYAGM2CNM189N', M2JP: 'MYAGM2JPM189N', M2GB: 'MYAGM2GBM189N', M3EZ: 'MYAGM3EZM196N', WALCL: 'WALCL', RRPONTSYD: 'RRPONTSYD', DGS2: 'DGS2', DEXUSEU: 'DEXUSEU', DEXJPUS: 'DEXJPUS', DEXCHUS: 'DEXCHUS', DEXUSUK: 'DEXUSUK' };
+// Maximum age (days) before a FRED series is treated as discontinued/stale and excluded. Monthly aggregates get 120 days, quarterly GDP 200, weekly 30, daily 14.
+const FRED_MAX_AGE = { WRESBAL: 30, GDP: 200, IORB: 30, HY: 14, CCC: 14, BB: 14, IG: 14, JPNASSETS: 120, M2SL: 120, M2CN: 120, M2JP: 120, M2GB: 120, M3EZ: 120, WALCL: 30, RRPONTSYD: 14, DGS2: 14, DEXUSEU: 14, DEXJPUS: 14, DEXCHUS: 14, DEXUSUK: 14 };
 
 async function loadAll() {
   const D = {}, H = {};
   const tasks = Object.entries(SOURCES).map(async ([k, src]) => { const t0 = Date.now(); try { let txt = null, lastErr = null; for (const u of (src.urls || [src.url])) { try { txt = await getText(u, src.timeout || 18000); const probe = src.parse(txt); const n0 = Array.isArray(probe) ? probe.length : Object.values(probe).reduce((a, x) => a + (Array.isArray(x) ? x.length : (x.rows ? x.rows.length : 0)), 0); if (n0) { src._used = u; break; } txt = null; lastErr = new Error('parsed 0 observations'); } catch (e) { lastErr = e; txt = null; } } if (txt == null) throw lastErr || new Error('no url succeeded'); const v = src.parse(txt); const n = Array.isArray(v) ? v.length : Object.values(v).reduce((a, x) => a + (Array.isArray(x) ? x.length : (x.rows ? x.rows.length : 0)), 0); if (!n) throw new Error('parsed 0 observations'); D[k] = v; H[k] = { status: 'ok', name: src.name, obs: n, ms: Date.now() - t0, url: src._used || src.url }; } catch (e) { H[k] = { status: 'failed', name: src.name, error: String(e.message || e), ms: Date.now() - t0 }; } });
-  if (FRED_KEY) tasks.push(...Object.entries(FRED_IDS).map(async ([k, id]) => { const t0 = Date.now(); try { const s = parseFredJson(await getText(FRED(id), 20000)); if (!s.length) throw new Error('0 obs'); D['fred_' + k] = s; H['fred_' + k] = { status: 'ok', name: `FRED — ${id}`, obs: s.length, lastDate: last(s).d, staleDays: daysOld(last(s).d), ms: Date.now() - t0 }; } catch (e) { H['fred_' + k] = { status: 'failed', name: `FRED — ${id}`, error: String(e.message || e), ms: Date.now() - t0 }; } }));
+  if (FRED_KEY) tasks.push(...Object.entries(FRED_IDS).map(async ([k, id]) => { const t0 = Date.now(); try { const s = parseFredJson(await getText(FRED(id), 20000)); if (!s.length) throw new Error('0 obs'); const age = daysOld(last(s).d); if (age > (FRED_MAX_AGE[k] || 60)) { H['fred_' + k] = { status: 'stale', name: `FRED — ${id}`, obs: s.length, lastDate: last(s).d, staleDays: age, error: `last observation ${last(s).d} is ${age} days old — series discontinued or not updated; excluded`, ms: Date.now() - t0 }; return; } D['fred_' + k] = s; H['fred_' + k] = { status: 'ok', name: `FRED — ${id}`, obs: s.length, lastDate: last(s).d, staleDays: age, ms: Date.now() - t0 }; } catch (e) { H['fred_' + k] = { status: 'failed', name: `FRED — ${id}`, error: String(e.message || e), ms: Date.now() - t0 }; } }));
   else H.fred = { status: 'not_configured', name: 'FRED (api.stlouisfed.org)', error: 'FRED_API_KEY environment variable not set — reserves, credit spreads, Fed/BoJ balance sheets and M2 are unavailable until it is.' };
   await Promise.all(tasks);
   return { D, H };
@@ -146,7 +148,7 @@ function build(D, H) {
   else unavailable('sofr_iorb', 'plumbing', 15, -1, 'SOFR minus IORB', 'bp', 'NY Fed SOFR or a policy-rate source did not load.');
 
   // 2. Reserves / GDP — level-scored vs the Fed's own thresholds (10% sensitive, 12% comfortable)
-  if (F('WRESBAL') && F('GDP')) { const ratio = alignRatio(F('WRESBAL').map(p => ({ d: p.d, v: p.v / 1000 })), F('GDP'), 100); const v = last(ratio).v; full.res_gdp = { level: ratio }; add({ id: 'res_gdp', block: 'plumbing', weight: 10, dir: 1, name: 'Bank reserves as a share of GDP', unit: '%', value: r2(v), asOf: last(ratio).d, chg4w: r2(changeOver(ratio, 28)), z: r2(clamp(v - 11, -2.5, 2.5)), scoreMethod: 'Level score: 10% = −1, 11% = 0, 12% = +1 (Fed research: repo rates become issuance-sensitive below ~10% of GDP, insensitive above 12%).', status: 'ok', series: tail(ratio, 160), levelBn: r1(last(F('WRESBAL')).v) }); }
+  if (F('WRESBAL') && F('GDP')) { const ratio = alignRatio(F('WRESBAL').map(p => ({ d: p.d, v: p.v / 1000 })), F('GDP'), 100); const v = last(ratio).v; full.res_gdp = { level: ratio }; add({ id: 'res_gdp', block: 'plumbing', weight: 10, dir: 1, name: 'Bank reserves as a share of GDP', unit: '%', value: r2(v), asOf: last(ratio).d, chg4w: r2(changeOver(ratio, 28)), z: r2(clamp(v - 11, -2.5, 2.5)), scoreMethod: 'Level score: 10% = −1, 11% = 0, 12% = +1 (Fed research: repo rates become issuance-sensitive below ~10% of GDP, insensitive above 12%).', status: 'ok', series: tail(ratio, 160), levelBn: r1(last(F('WRESBAL')).v / 1000) }); }
   else unavailable('res_gdp', 'plumbing', 10, 1, 'Bank reserves as a share of GDP', '%', 'Needs FRED (WRESBAL, GDP).');
 
   // 3. TGA 4-week change ($bn) — Treasury FiscalData, daily
@@ -170,7 +172,7 @@ function build(D, H) {
   else unavailable('ccc_bb', 'credit', 10, -1, 'CCC minus BB spread', '%', 'Needs FRED (BAMLH0A3HYC, BAMLH0A1HYBB).');
 
   // 7. Fed reserves, 13-week % change
-  if (F('WRESBAL')) { const ch = rollChange(F('WRESBAL'), 91, true); full.fed_res_chg = { s: ch, w: 1095 }; zInput({ id: 'fed_res_chg', block: 'balance', weight: 8, dir: 1, name: 'Fed reserve balances, 13-week change', unit: '%', keep: 160 }, ch, 1095, { level: r1(last(F('WRESBAL')).v), levelUnit: '$bn', levelSeries: tail(F('WRESBAL'), 160) }); }
+  if (F('WRESBAL')) { const ch = rollChange(F('WRESBAL'), 91, true); full.fed_res_chg = { s: ch, w: 1095 }; zInput({ id: 'fed_res_chg', block: 'balance', weight: 8, dir: 1, name: 'Fed reserve balances, 13-week change', unit: '%', keep: 160 }, ch, 1095, { level: r1(last(F('WRESBAL')).v / 1000), levelUnit: '$bn', levelSeries: tail(F('WRESBAL').map(p => ({ d: p.d, v: p.v / 1000 })), 160) }); }
   else unavailable('fed_res_chg', 'balance', 8, 1, 'Fed reserve balances, 13-week change', '%', 'Needs FRED (WRESBAL).');
 
   // 8. Eurosystem liquidity — current accounts + deposit facility (ECB ILM), 13-week % change
@@ -197,12 +199,12 @@ function build(D, H) {
       const g = conv[0].s.filter(p => p.d >= base).map(p => { let tot = 0; for (const c of conv) { const q = atOrBefore(c.s, p.d); if (!q) return null; tot += q.v * c.k; } return { d: p.d, v: tot }; }).filter(Boolean);
       const ann = annualise(g); full.m2 = { s: ann, w: 1825 };
       zInput({ id: 'm2', block: 'money', weight: 5, dir: 1, name: `Global M2 (${comps.length} economies, constant FX), 3-month annualised`, unit: '%', keep: 60 }, ann, 1825, { yoy: r1(changeOver(g, 365, true)), components: comps.map(([m]) => FRED_IDS[m]) });
-    } else if (F('M2SL')) { const ann = annualise(F('M2SL')); full.m2 = { s: ann, w: 1825 }; zInput({ id: 'm2', block: 'money', weight: 5, dir: 1, name: 'US M2, 3-month annualised', unit: '%', keep: 60, status: 'substituted', note: 'Fewer than three non-US M2 series available from FRED; US M2 shown.' }, ann, 1825, { yoy: r1(changeOver(F('M2SL'), 365, true)) }); }
+    } else if (F('M2SL')) { const ann = annualise(F('M2SL')); full.m2 = { s: ann, w: 1825 }; zInput({ id: 'm2', block: 'money', weight: 5, dir: 1, name: 'US M2, 3-month annualised', unit: '%', keep: 60, status: 'substituted', note: 'FRED\'s euro-area, Japan, China and UK money-supply series are discontinued (last updated 2017–2019) or absent, so a constant-FX global M2 cannot be built from free feeds; US M2 is shown and labelled.' }, ann, 1825, { yoy: r1(changeOver(F('M2SL'), 365, true)) }); }
     else unavailable('m2', 'money', 5, 1, 'Global M2, 3-month annualised', '%', 'Needs FRED (M2SL and partners).');
   }
   // 12. China money — M2 year-on-year as the proxy for the credit impulse
   if (F('M2CN')) { const yoy = rollChange(F('M2CN'), 365, true); full.cn_money = { s: yoy, w: 1825 }; zInput({ id: 'cn_money', block: 'money', weight: 5, dir: 1, name: 'China M2, year-on-year (proxy for credit impulse)', unit: '%', keep: 60, status: 'substituted', note: 'Total Social Financing has no free machine-readable feed; China M2 growth is the proxy.' }, yoy, 1825); }
-  else unavailable('cn_money', 'money', 5, 1, 'China credit impulse', '%', 'Needs FRED (MYAGM2CNM189N).');
+  else unavailable('cn_money', 'money', 5, 1, 'China credit impulse', '%', 'No current free machine-readable series: FRED\'s China M2 (MYAGM2CNM189N) stopped in 2019 and Total Social Financing is not published in an open API. Excluded rather than shown stale.');
 
   // 13. VIX (CBOE)
   if (D.cboe_vix) { full.vix = { s: D.cboe_vix, w: 730 }; zInput({ id: 'vix', block: 'volfx', weight: 5, dir: -1, name: 'VIX (equity volatility)', unit: 'index', status: 'substituted', note: 'MOVE (bond volatility) is the preferred input but has no free machine-readable feed; VIX is used.' }, D.cboe_vix, 730); }
@@ -359,7 +361,7 @@ module.exports = async (req, res) => {
       ]
     };
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    const hardFails = Object.values(H).filter(h => h.status === 'failed').length;
+    const hardFails = Object.values(H).filter(h => h.status === 'failed' && !/^HTTP 4/.test(h.error || '')).length;
     res.setHeader('Cache-Control', req.query && req.query.fresh ? 'no-store' : hardFails ? 'public, s-maxage=900, stale-while-revalidate=3600' : 'public, s-maxage=21600, stale-while-revalidate=86400');
     out.cachePolicy = hardFails ? 'short (15 min) — a feed failed this load, will retry' : 'standard (6 h)';
     res.setHeader('Access-Control-Allow-Origin', '*');
