@@ -36,7 +36,7 @@ h2{font-size:17px;margin:0 0 6px;letter-spacing:-.01em}h3{font-size:14px;margin:
 .kpis{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
 .kpi{background:var(--surface-2);border-radius:10px;padding:8px 12px;min-width:120px}.kpi .l{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em}.kpi .v{font-size:18px;font-weight:600}
 .expert{display:none;border-left:3px solid var(--accent);padding:8px 12px;margin:8px 0;background:var(--surface-2);border-radius:0 8px 8px 0;font-size:13.5px}
-body.expert .expert{display:block}
+body.mode-expert .expert{display:block}
 .explain{font-size:13.5px;color:var(--ink-2)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media (max-width:820px){.grid2{grid-template-columns:1fr}}
 .tug{display:grid;grid-template-columns:1fr;gap:6px}
@@ -258,8 +258,8 @@ function renderRegion(){ const r=DATA.regions.find(x=>x.id===selRegion); if(!r) 
     h+=`<tr><td>${esc(p.k)}${p.asOf?`<br><span class="small">${p.asOf}</span>`:''}</td><td class="num">${fmt(p.v,p.unit)}${p.level!=null&&p.unit!=='score'?`<br><span class="small">level ${p.level}</span>`:''}</td><td class="num">${ch}</td><td class="num" style="color:${p.score>0?'var(--pos)':p.score<0?'var(--neg)':'inherit'}">${p.score==null?'—':sgn(p.score)}</td><td class="num">${p.w||'—'}</td><td>${p.series?spark(p.series,110,28,'var(--accent)',false):''}</td><td class="small">${esc(p.src||'')}</td></tr>`; }
   h+='</table></div><p class="small">Regional score = weighted average of input scores (policy-rate 6-month change: 100bp of hikes ≈ −2; effective exchange rate 13-week change: +6% ≈ +2; OFR regional stress z-score, inverted; plus market-specific inputs). Inputs with weight 0 are shown for context only.</p>';
   document.getElementById('rdetail').innerHTML=h; }
-document.getElementById('modePlain').onclick=()=>{document.body.classList.remove('expert');document.getElementById('modePlain').classList.add('on');document.getElementById('modeExpert').classList.remove('on');try{localStorage.setItem('liq-mode','plain')}catch(e){}};
-document.getElementById('modeExpert').onclick=()=>{document.body.classList.add('expert');document.getElementById('modeExpert').classList.add('on');document.getElementById('modePlain').classList.remove('on');try{localStorage.setItem('liq-mode','expert')}catch(e){}};
+document.getElementById('modePlain').onclick=()=>{document.body.classList.remove('mode-expert');document.getElementById('modePlain').classList.add('on');document.getElementById('modeExpert').classList.remove('on');try{localStorage.setItem('liq-mode','plain')}catch(e){}};
+document.getElementById('modeExpert').onclick=()=>{document.body.classList.add('mode-expert');document.getElementById('modeExpert').classList.add('on');document.getElementById('modePlain').classList.remove('on');try{localStorage.setItem('liq-mode','expert')}catch(e){}};
 try{ if(localStorage.getItem('liq-mode')==='expert') document.getElementById('modeExpert').click(); }catch(e){}
 load();
 </script>
