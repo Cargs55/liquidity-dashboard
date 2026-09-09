@@ -6,6 +6,8 @@
 // Verified sources (probe 8 Sep 2026): NY Fed Markets API (SOFR, EFFR, repo ops), US Treasury FiscalData (TGA),
 // OFR Financial Stress Index, ECB Data Portal (ILM), BIS (policy rates, effective exchange rates),
 // CBOE (VIX), RBA statistical tables (A1, F1, F2). FRED via api.stlouisfed.org when FRED_API_KEY is set.
+// Added 10 Sep 2026 (verified from the Vercel runtime): ECB BSI (euro M3), Bank of England IADB (UK M4), Bank of Japan
+// time-series page (M2), BIS credit to China (FRED copy QCNPAM770A + BIS v1 API). Discontinued FRED money series removed.
 
 const DAY = 86400000;
 const UA = { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36', 'Accept': 'text/csv,application/json,text/plain,*/*;q=0.8' };
@@ -83,6 +85,16 @@ function parseNyfedRates(txt, type) { const j = JSON.parse(txt); return dedupe((
 function parseNyfedRepo(txt) { const j = JSON.parse(txt); const ops = (j.repo && j.repo.operations) || []; const by = {};
   for (const o of ops) { if (!/repo/i.test(o.operationType || '') || /reverse/i.test(o.operationType || '')) continue; const d = o.operationDate; let amt = Number(o.totalAmtAccepted); if (!Number.isFinite(amt) && Array.isArray(o.details)) amt = o.details.reduce((a, x) => a + (Number(x.amtAccepted) || 0), 0); if (!Number.isFinite(amt)) continue; by[d] = (by[d] || 0) + amt / 1e9; }
   return dedupe(Object.entries(by).map(([d, v]) => ({ d, v }))); }
+function parseBoe(txt) { // Bank of England IADB CSV: "DATE,LPMAUYN" rows like "31 Jul 2026,3298964" (£mn) -> monthly, dated 1st of month
+  const out = []; for (const l of txt.split(/\r?\n/).slice(1)) { const c = splitCsv(l); const m = (c[0] || '').trim().match(/^(\d{1,2}) ([A-Za-z]{3}) (\d{4})$/); if (!m) continue; const mm = MON[m[2].toLowerCase()]; const v = Number(c[1]); if (mm && Number.isFinite(v)) out.push({ d: `${m[3]}-${pad(mm)}-01`, v }); } return dedupe(out); }
+function parseBojMs(txt) { // BoJ "Main time-series statistics" money-stock page (md02_m_1_en.html): rows "YYYY/MM  <8 yoy % columns> <8 level columns in ¥100mn>"; M2 yoy = col 1, M2 average amount outstanding = col 9
+  const rows = txt.split(/<tr[^>]*>/i); const lvl = [], yoy = [];
+  for (const r of rows) { const cells = r.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim().split(/\s+/); const m = (cells[0] || '').match(/^(\d{4})\/(\d{2})$/); if (!m) continue; const nums = cells.slice(1).map(Number); if (nums.length < 9 || !nums.slice(0, 9).every(Number.isFinite)) continue; const d = `${m[1]}-${m[2]}-01`; yoy.push({ d, v: nums[0] }); lvl.push({ d, v: nums[8] / 10000 }); } // -> ¥tn
+  const L = dedupe(lvl), Y = dedupe(yoy); if (L.length < 24) return {};
+  // integrity check: year-on-year growth computed from the level column must agree with the BoJ's own yoy column (guards against a column shift)
+  const chk = L.slice(-12).map(p => { const q = atOrBefore(L, shiftIso(p.d, -365)); const y = Y.find(x => x.d === p.d); return q && y ? Math.abs((p.v / q.v - 1) * 100 - y.v) : null; }).filter(x => x != null);
+  if (!chk.length || Math.max(...chk) > 0.6) throw new Error('BoJ M2 column check failed (level-derived yoy disagrees with published yoy)');
+  return { M2: L, M2_YOY: Y }; }
 function parseTga(txt) { const j = JSON.parse(txt); return dedupe((j.data || []).filter(r => /Closing Balance/i.test(r.account_type || '')).map(r => { let v = Number(r.close_today_bal); if (!Number.isFinite(v)) v = Number(r.open_today_bal); return { d: r.record_date, v: v / 1000 }; }).filter(p => Number.isFinite(p.v))); }
 
 // ---------- series math ----------
@@ -116,11 +128,19 @@ const SOURCES = {
   rba_a1: { url: 'https://www.rba.gov.au/statistics/tables/csv/a1-data.csv', parse: parseRba, name: 'RBA — A1 balance sheet' },
   rba_f1: { url: 'https://www.rba.gov.au/statistics/tables/csv/f1-data.csv', parse: parseRba, name: 'RBA — F1 money market rates' },
   rba_f2: { url: 'https://www.rba.gov.au/statistics/tables/csv/f2-data.csv', parse: parseRba, name: 'RBA — F2 government bond yields' },
+  // Money-supply partners (verified 10 Sep 2026; replace the discontinued FRED copies)
+  ecb_m3: { url: 'https://data-api.ecb.europa.eu/service/data/BSI/M.U2.Y.V.M30.X.1.U2.2300.Z01.E?format=csvdata&startPeriod=2011-01&detail=dataonly', parse: parseSdmxCsv, name: 'ECB — euro area M3 (BSI, €mn)', timeout: 22000 },
+  boe_m4: { url: 'https://www.bankofengland.co.uk/boeapps/database/_iadb-fromshowcolumns.asp?csv.x=yes&Datefrom=01/Jan/2011&Dateto=now&SeriesCodes=LPMAUYN&CSVF=TN&UsingCodes=Y&VPD=Y&VFD=N', parse: parseBoe, name: 'Bank of England — UK M4 (LPMAUYN, £mn)' },
+  boj_m2: { url: 'https://www.stat-search.boj.or.jp/ssi/mtshtml/md02_m_1_en.html', parse: parseBojMs, name: 'Bank of Japan — money stock M2 (average amounts outstanding)' },
+  // China credit (BIS total credit to the private non-financial sector, % of GDP) — fallback when the FRED copy is missing
+  bis_tc_cn: { url: 'https://stats.bis.org/api/v1/data/WS_TC/Q.CN.P.A.M.770.A/all?format=csv&startPeriod=2005-01-01', parse: parseSdmxCsv, name: 'BIS — credit to China private non-financial sector (% GDP)', timeout: 25000 },
 };
-const FRED_SERIES = { WRESBAL: 'Reserve balances', GDP: 'US nominal GDP', IORB: 'Interest on reserve balances', HY: 'BAMLH0A0HYM2', CCC: 'BAMLH0A3HYC', BB: 'BAMLH0A1HYBB', IG: 'BAMLC0A0CM', JPNASSETS: 'BoJ total assets', M2SL: 'US M2', MYAGM2CNM189N: 'China M2', MYAGM2JPM189N: 'Japan M2', MYAGM2GBM189N: 'UK M2', MYAGM3EZM196N: 'Euro area M3', WALCL: 'Fed total assets', RRPONTSYD: 'ON RRP', DTWEXBGS: 'Broad dollar', DGS2: 'US 2y', DEXUSEU: 'EUR/USD', DEXJPUS: 'USD/JPY', DEXCHUS: 'USD/CNY', DEXUSUK: 'GBP/USD' };
-const FRED_IDS = { WRESBAL: 'WRESBAL', GDP: 'GDP', IORB: 'IORB', HY: 'BAMLH0A0HYM2', CCC: 'BAMLH0A3HYC', BB: 'BAMLH0A1HYBB', IG: 'BAMLC0A0CM', JPNASSETS: 'JPNASSETS', M2SL: 'M2SL', M2CN: 'MYAGM2CNM189N', M2JP: 'MYAGM2JPM189N', M2GB: 'MYAGM2GBM189N', M3EZ: 'MYAGM3EZM196N', WALCL: 'WALCL', RRPONTSYD: 'RRPONTSYD', DGS2: 'DGS2', DEXUSEU: 'DEXUSEU', DEXJPUS: 'DEXJPUS', DEXCHUS: 'DEXCHUS', DEXUSUK: 'DEXUSUK' };
+// Deleted 10 Sep 2026 (discontinued on FRED, verified): MYAGM2CNM189N (China M2, ends 2019), MYAGM2JPM189N (Japan M2, ends 2017), MYAGM3EZM196N (euro M3, ends 2017), MYAGM2GBM189N (UK M2, HTTP 400).
+const FRED_SERIES = { WRESBAL: 'Reserve balances', GDP: 'US nominal GDP', IORB: 'Interest on reserve balances', HY: 'BAMLH0A0HYM2', CCC: 'BAMLH0A3HYC', BB: 'BAMLH0A1HYBB', IG: 'BAMLC0A0CM', JPNASSETS: 'BoJ total assets', M2SL: 'US M2', CNCR: 'BIS credit to China private non-financial sector, % GDP', WALCL: 'Fed total assets', RRPONTSYD: 'ON RRP', DTWEXBGS: 'Broad dollar', DGS2: 'US 2y', DEXUSEU: 'EUR/USD', DEXJPUS: 'USD/JPY', DEXCHUS: 'USD/CNY', DEXUSUK: 'GBP/USD' };
+const FRED_IDS = { WRESBAL: 'WRESBAL', GDP: 'GDP', IORB: 'IORB', HY: 'BAMLH0A0HYM2', CCC: 'BAMLH0A3HYC', BB: 'BAMLH0A1HYBB', IG: 'BAMLC0A0CM', JPNASSETS: 'JPNASSETS', M2SL: 'M2SL', CNCR: 'QCNPAM770A', WALCL: 'WALCL', RRPONTSYD: 'RRPONTSYD', DGS2: 'DGS2', DEXUSEU: 'DEXUSEU', DEXJPUS: 'DEXJPUS', DEXCHUS: 'DEXCHUS', DEXUSUK: 'DEXUSUK' };
 // Maximum age (days) before a FRED series is treated as discontinued/stale and excluded. Monthly aggregates get 120 days, quarterly GDP 200, weekly 30, daily 14.
-const FRED_MAX_AGE = { WRESBAL: 30, GDP: 200, IORB: 30, HY: 14, CCC: 14, BB: 14, IG: 14, JPNASSETS: 120, M2SL: 120, M2CN: 120, M2JP: 120, M2GB: 120, M3EZ: 120, WALCL: 30, RRPONTSYD: 14, DGS2: 14, DEXUSEU: 14, DEXJPUS: 14, DEXCHUS: 14, DEXUSUK: 14 };
+// CNCR (BIS credit, quarterly, dated at quarter start, published ~5.5 months after quarter-end, so the latest point is 8.5–11.5 months old in normal operation): 400 days.
+const FRED_MAX_AGE = { WRESBAL: 30, GDP: 200, IORB: 30, HY: 14, CCC: 14, BB: 14, IG: 14, JPNASSETS: 120, M2SL: 120, CNCR: 400, WALCL: 30, RRPONTSYD: 14, DGS2: 14, DEXUSEU: 14, DEXJPUS: 14, DEXCHUS: 14, DEXUSUK: 14 };
 
 async function loadAll() {
   const D = {}, H = {};
@@ -189,26 +209,42 @@ function build(D, H) {
   if (F('JPNASSETS')) { const ch = rollChange(F('JPNASSETS'), 91, true); full.boj_assets = { s: ch, w: 1825 }; zInput({ id: 'boj_assets', block: 'balance', weight: 3, dir: 1, name: 'Bank of Japan total assets, 3-month change', unit: '%', keep: 60 }, ch, 1825, { level: r1(last(F('JPNASSETS')).v / 10000), levelUnit: '¥tn', levelSeries: tail(F('JPNASSETS'), 60) }); }
   else unavailable('boj_assets', 'balance', 3, 1, 'Bank of Japan total assets, 3-month change', '%', 'Needs FRED (JPNASSETS).');
 
-  // 11. Money — global M2 at constant FX when ≥3 components load, else US M2
+  // 11. Money — global M2 at constant (latest) FX: US M2 (FRED) + euro area M3 (ECB BSI) + Japan M2 (BoJ) + UK M4 (BoE). Falls back to US M2 if fewer than 3 partners load.
+  // China is not included: no open machine-readable money-supply series exists (FRED's copy ended in 2019); see the China credit input instead.
   {
-    const comps = [['M2SL', null, 1], ['M3EZ', 'DEXUSEU', 1], ['M2JP', 'DEXJPUS', -1], ['M2CN', 'DEXCHUS', -1], ['M2GB', 'DEXUSUK', 1]].filter(([m]) => F(m));
     const annualise = g => g.map(p => { const q = atOrBefore(g, shiftIso(p.d, -91)); return q && q.v > 0 ? { d: p.d, v: ((p.v / q.v) ** 4 - 1) * 100 } : null; }).filter(Boolean);
-    if (comps.length >= 3 && comps.every(([, fx]) => !fx || F(fx))) {
-      const base = comps.map(([m]) => F(m)[0].d).sort().pop();
-      const conv = comps.map(([m, fx, sign]) => { let k = 1; if (fx) { const q = atOrBefore(F(fx), base) || F(fx)[0]; k = sign > 0 ? q.v : 1 / q.v; } return { s: F(m), k }; });
-      const g = conv[0].s.filter(p => p.d >= base).map(p => { let tot = 0; for (const c of conv) { const q = atOrBefore(c.s, p.d); if (!q) return null; tot += q.v * c.k; } return { d: p.d, v: tot }; }).filter(Boolean);
+    const fxLast = (k, inv) => { const s = F(k); if (!s || !s.length) return null; const v = last(s).v; return inv ? 1 / v : v; };
+    const cand = [
+      { id: 'US', name: 'US M2', s: F('M2SL'), fx: 1, src: 'FRED M2SL' },
+      { id: 'EA', name: 'euro area M3', s: D.ecb_m3 && D.ecb_m3.M30 ? D.ecb_m3.M30.map(p => ({ d: p.d, v: p.v / 1000 })) : null, fx: fxLast('DEXUSEU', false), src: 'ECB BSI M30' },
+      { id: 'JP', name: 'Japan M2', s: D.boj_m2 && D.boj_m2.M2 ? D.boj_m2.M2.map(p => ({ d: p.d, v: p.v * 1000 })) : null, fx: fxLast('DEXJPUS', true), src: 'BoJ MD02' },
+      { id: 'GB', name: 'UK M4', s: D.boe_m4 ? D.boe_m4.map(p => ({ d: p.d, v: p.v / 1000 })) : null, fx: fxLast('DEXUSUK', false), src: 'BoE LPMAUYN' },
+    ];
+    const comps = cand.filter(c => c.s && c.s.length > 36 && c.fx && daysOld(last(c.s).d) <= 120);
+    const missing = cand.filter(c => !comps.includes(c)).map(c => c.name);
+    if (comps.length >= 3 && comps[0].id === 'US') {
+      const months = comps.map(c => new Set(c.s.map(p => p.d.slice(0, 7)))); const common = [...months[0]].filter(m => months.every(S => S.has(m))).sort();
+      const g = common.map(m => ({ d: m + '-01', v: comps.reduce((a, c) => a + c.s.find(p => p.d.slice(0, 7) === m).v * c.fx, 0) }));
       const ann = annualise(g); full.m2 = { s: ann, w: 1825 };
-      zInput({ id: 'm2', block: 'money', weight: 5, dir: 1, name: `Global M2 (${comps.length} economies, constant FX), 3-month annualised`, unit: '%', keep: 60 }, ann, 1825, { yoy: r1(changeOver(g, 365, true)), components: comps.map(([m]) => FRED_IDS[m]) });
-    } else if (F('M2SL')) { const ann = annualise(F('M2SL')); full.m2 = { s: ann, w: 1825 }; zInput({ id: 'm2', block: 'money', weight: 5, dir: 1, name: 'US M2, 3-month annualised', unit: '%', keep: 60, status: 'substituted', note: 'FRED\'s euro-area, Japan, China and UK money-supply series are discontinued (last updated 2017–2019) or absent, so a constant-FX global M2 cannot be built from free feeds; US M2 is shown and labelled.' }, ann, 1825, { yoy: r1(changeOver(F('M2SL'), 365, true)) }); }
-    else unavailable('m2', 'money', 5, 1, 'Global M2, 3-month annualised', '%', 'Needs FRED (M2SL and partners).');
+      const compsOut = comps.map(c => { const p = c.s.find(x => x.d.slice(0, 7) === last(g).d.slice(0, 7)); return { id: c.id, name: c.name, src: c.src, asOf: p.d, usdBn: r1(p.v * c.fx), share: r1(p.v * c.fx / last(g).v * 100), yoy: r1(changeOver(c.s, 365, true, c.s.indexOf(p))) }; });
+      zInput({ id: 'm2', block: 'money', weight: 5, dir: 1, name: `Global M2 (${comps.map(c => c.id).join('+')}, constant FX), 3-month annualised`, unit: '%', keep: 60, status: 'ok', note: `Sum of ${comps.map(c => c.name).join(', ')} converted at the latest exchange rates and held constant, so currency moves cannot flatter or depress it.${missing.length ? ` Not loaded this run: ${missing.join(', ')}.` : ''} China is not included — no open machine-readable series exists.` }, ann, 1825, { yoy: r1(changeOver(g, 365, true)), levelUsdTn: r2(last(g).v / 1000), components: compsOut });
+    } else if (F('M2SL')) { const ann = annualise(F('M2SL')); full.m2 = { s: ann, w: 1825 }; zInput({ id: 'm2', block: 'money', weight: 5, dir: 1, name: 'US M2, 3-month annualised', unit: '%', keep: 60, status: 'substituted', note: `Fewer than three money-supply partners loaded this run (missing: ${missing.join(', ') || 'none'}), so the constant-FX global aggregate could not be built; US M2 is shown and labelled.` }, ann, 1825, { yoy: r1(changeOver(F('M2SL'), 365, true)) }); }
+    else unavailable('m2', 'money', 5, 1, 'Global M2, 3-month annualised', '%', 'Needs FRED (M2SL) plus ECB, BoJ and BoE money-supply feeds.');
   }
-  // 12. China money — M2 year-on-year as the proxy for the credit impulse
-  if (F('M2CN')) { const yoy = rollChange(F('M2CN'), 365, true); full.cn_money = { s: yoy, w: 1825 }; zInput({ id: 'cn_money', block: 'money', weight: 5, dir: 1, name: 'China M2, year-on-year (proxy for credit impulse)', unit: '%', keep: 60, status: 'substituted', note: 'Total Social Financing has no free machine-readable feed; China M2 growth is the proxy.' }, yoy, 1825); }
-  else unavailable('cn_money', 'money', 5, 1, 'China credit impulse', '%', 'No current free machine-readable series: FRED\'s China M2 (MYAGM2CNM189N) stopped in 2019 and Total Social Financing is not published in an open API. Excluded rather than shown stale.');
+  // 12. China credit — BIS total credit to the private non-financial sector as % of GDP (quarterly; FRED copy QCNPAM770A, BIS API fallback).
+  //     Scored on the 4-quarter change in the ratio: credit growing faster than the economy = easing. This is the open-data proxy for the credit impulse (Total Social Financing has no open API).
+  {
+    let cr = F('CNCR'), crSrc = 'FRED QCNPAM770A (BIS)';
+    if (!cr && D.bis_tc_cn) { const s = Object.values(D.bis_tc_cn)[0]; if (s && s.length && daysOld(last(s).d) <= 400) { cr = s; crSrc = 'BIS WS_TC'; } }
+    if (cr && cr.length > 44) { const ch = rollChange(cr, 365, false); full.cn_credit = { s: ch, w: 3650 }; const q = last(cr).d; const qn = Math.floor((+q.slice(5, 7) - 1) / 3) + 1;
+      zInput({ id: 'cn_credit', block: 'money', weight: 5, dir: 1, name: 'China private-sector credit vs GDP (BIS), 4-quarter change', unit: 'pp', keep: 40, status: 'ok', note: `Proxy for the credit impulse: the change over four quarters in BIS credit to China's private non-financial sector as a share of GDP. Quarterly, published about five months after quarter-end — a regime input, not a timing one. Source: ${crSrc}.` }, ch, 3650, { chg4w: null, level: r1(last(cr).v), levelUnit: '% of GDP', period: `Q${qn} ${q.slice(0, 4)}`, levelSeries: tail(cr, 40) }); }
+    else unavailable('cn_credit', 'money', 5, 1, 'China private-sector credit vs GDP (BIS), 4-quarter change', 'pp', 'Neither the FRED copy (QCNPAM770A) nor the BIS API returned a current series.');
+  }
 
-  // 13. VIX (CBOE)
-  if (D.cboe_vix) { full.vix = { s: D.cboe_vix, w: 730 }; zInput({ id: 'vix', block: 'volfx', weight: 5, dir: -1, name: 'VIX (equity volatility)', unit: 'index', status: 'substituted', note: 'MOVE (bond volatility) is the preferred input but has no free machine-readable feed; VIX is used.' }, D.cboe_vix, 730); }
-  else unavailable('vix', 'volfx', 5, -1, 'VIX', 'index', 'CBOE feed did not load.');
+  // 13. Volatility — OFR Financial Stress Index volatility sub-index (equity, rate and FX implied volatility; daily, free). MOVE has no open feed; VIX is kept as context and as the fallback.
+  if (D.ofr && D.ofr.Volatility && D.ofr.Volatility.length > 250) { const v = D.ofr.Volatility; full.vol = { s: v, w: 730 }; zInput({ id: 'vol', block: 'volfx', weight: 5, dir: -1, name: 'Market volatility (OFR volatility sub-index: equities, rates, FX)', unit: 'index', status: 'ok', note: 'Replaces VIX as the volatility input: the OFR sub-index blends implied volatility across equities, interest rates and currencies, so it captures bond-market volatility (the MOVE concept) that VIX alone misses. MOVE itself is proprietary (ICE) and has no free feed.' }, v, 730, { vix: D.cboe_vix ? r2(last(D.cboe_vix).v) : null, vixAsOf: D.cboe_vix ? last(D.cboe_vix).d : null, vixSeries: D.cboe_vix ? tail(D.cboe_vix, 260) : null }); }
+  else if (D.cboe_vix) { full.vol = { s: D.cboe_vix, w: 730 }; zInput({ id: 'vol', block: 'volfx', weight: 5, dir: -1, name: 'VIX (equity volatility)', unit: 'index', status: 'substituted', note: 'The OFR volatility sub-index did not load this run; VIX (CBOE) is used as the fallback.' }, D.cboe_vix, 730, { vix: r2(last(D.cboe_vix).v) }); }
+  else unavailable('vol', 'volfx', 5, -1, 'Market volatility', 'index', 'Neither the OFR volatility sub-index nor the CBOE VIX feed loaded.');
 
   // 14. Broad US dollar (BIS nominal effective exchange rate), 13-week % change
   const eerUS = D.bis_eer && D.bis_eer.US;
@@ -282,10 +318,14 @@ function regions(D, core) {
     if (R.id === 'eu') { const x = ci('ecb_liq'); if (x && x.status !== 'unavailable') parts.push({ id: 'ecb_liq', k: 'Eurosystem bank liquidity (deposit facility + current accounts)', v: x.level, unit: '€bn', chg13w: x.value, asOf: x.asOf, score: sig('ecb_liq'), w: 35, series: x.levelSeries, src: 'ECB ILM' });
       if (D.ecb_ilm && D.ecb_ilm.L050100) { const g = D.ecb_ilm.L050100; parts.push({ id: 'eu_gov', k: 'Central government deposits at the Eurosystem', v: r1(last(g).v / 1000), unit: '€bn', asOf: last(g).d, chg4w: r1(changeOver(g, 28) / 1000), score: null, w: 0, src: 'ECB ILM' }); } }
     if (R.id === 'jp') { const x = ci('boj_assets'); if (x && x.status !== 'unavailable') parts.push({ id: 'boj_assets', k: 'Bank of Japan total assets', v: x.level, unit: '¥tn', chg13w: x.value, asOf: x.asOf, score: sig('boj_assets'), w: 35, series: x.levelSeries, src: 'FRED' }); }
-    if (R.id === 'cn') { const x = ci('cn_money'); if (x && x.status !== 'unavailable') parts.push({ id: 'cn_money', k: 'China M2, year-on-year', v: x.value, unit: '%', asOf: x.asOf, score: sig('cn_money'), w: 35, series: x.series, src: 'FRED' }); }
+    if (R.id === 'cn') { const x = ci('cn_credit'); if (x && x.status !== 'unavailable') parts.push({ id: 'cn_credit', k: `China private-sector credit vs GDP (BIS), 4-quarter change — ${x.period}`, v: x.value, unit: 'pp', asOf: x.asOf, level: x.level, score: sig('cn_credit'), w: 35, series: x.series, src: 'BIS via FRED' }); }
+    // money-supply context rows (not scored; the global aggregate carries the weight)
+    { const m = ci('m2'); const comp = m && m.components ? m.components.find(c => ({ eu: 'EA', jp: 'JP', gb: 'GB' })[R.id] === c.id) : null;
+      if (comp) parts.push({ id: 'money', k: `${comp.name}, year-on-year (${comp.src})`, v: comp.yoy, unit: '%', asOf: comp.asOf, score: null, w: 0, src: comp.src }); }
+    if (R.id === 'tw') R.note = 'No open machine-readable policy-rate feed exists for Taiwan (the CBC publishes its discount rate only on its website and BIS does not carry it), so the policy-rate row is omitted rather than guessed; the reading rests on the Taiwan dollar and regional stress.';
     const score = scoreOf(parts); const scored = parts.filter(p => p.score != null && p.w > 0).length;
     const coverage = R.id === 'us' ? 'Full' : scored >= 4 ? 'Full' : scored >= 2 ? 'Partial' : scored === 1 ? 'Limited' : 'None';
-    out.push({ id: R.id, name: R.name, group: R.group, score, band: band(score), coverage, inputs: parts });
+    out.push({ id: R.id, name: R.name, group: R.group, score, band: band(score), coverage, inputs: parts, note: R.note || null });
   }
   const agg = (id, name, group, ids) => { const m = out.filter(r => ids.includes(r.id) && r.score != null); const sc = m.length ? r2(m.reduce((a, r) => a + r.score, 0) / m.length) : null; out.push({ id, name, group, score: sc, band: band(sc), coverage: 'Aggregate', inputs: m.map(r => ({ id: r.id, k: r.name, v: r.score, unit: 'score', score: r.score, w: 1 })) }); };
   agg('asiax', 'Asia ex-China (Japan, Korea, Taiwan, India)', 'Asia ex-China', ['jp', 'kr', 'tw', 'in']);
@@ -312,13 +352,13 @@ function commentary(core, regs, D) {
   };
   const headline = c.value == null ? 'No composite reading available.' : `Global liquidity is ${c.band.toUpperCase()} — composite ${c.value > 0 ? '+' : ''}${c.value.toFixed(2)}, ${trend}.`;
   const tensions = [];
-  const rg = ci('res_gdp'), fr = ci('fed_res_chg'), si = ci('sofr_iorb'), hy = ci('hy_oas'), cb = ci('ccc_bb'), vx = ci('vix'), usd = ci('usd'), m2 = ci('m2'), tga = ci('tga'), srf = ci('srf'), ecb = ci('ecb_liq'), rba = ci('rba_es');
+  const rg = ci('res_gdp'), fr = ci('fed_res_chg'), si = ci('sofr_iorb'), hy = ci('hy_oas'), cb = ci('ccc_bb'), vx = ci('vol'), usd = ci('usd'), m2 = ci('m2'), tga = ci('tga'), srf = ci('srf'), ecb = ci('ecb_liq'), rba = ci('rba_es');
   const ok = x => x && x.status !== 'unavailable' && x.value != null;
   if (ok(fr) && fr.value > 0 && ok(rg) && rg.value < 11.5) tensions.push({ title: 'The Fed is buying, but this is not stimulus', body: `Reserves are up ${fr.value}% over 13 weeks, which looks like easing. But reserves are only ${rg.value}% of GDP — inside the zone where the Fed's own research says repo rates start reacting to Treasury issuance. These purchases exist to stop liquidity falling, not to add it. Reading a growing Fed balance sheet as "QE" here is the most common mistake of this cycle.` });
   if (ok(rg) && rg.value < 10.5) tensions.push({ title: 'Reserves are at the sensitivity threshold', body: `At ${rg.value}% of GDP, bank reserves are at or below the ~10% level where repo rates become sensitive to Treasury issuance (roughly 10bp per $50bn of coupons, per Fed research). Expect quarter-end and tax-date squeezes to be sharper than the headline numbers suggest.` });
   if (ok(si) && si.value >= 4 && hy && hy.signed != null && hy.signed > 0) tensions.push({ title: 'Plumbing is strained while credit is relaxed', body: `Overnight funding is pricing above the Fed's floor (SOFR ${si.value}bp over IORB) — banks are competing for cash — while credit markets say lenders are unworried. When these two disagree, the plumbing has historically been right first. Treat the credit calm as borrowed.` });
   if (ok(si) && si.value <= 0 && hy && hy.signed != null && hy.signed < -0.75) tensions.push({ title: 'Credit is worried before the plumbing is', body: `Credit stress is elevated versus the past two years while overnight funding is calm (SOFR at or below IORB). That combination usually means the worry is about borrowers' earnings, not about the availability of money — a growth problem rather than a liquidity problem.` });
-  if (vx && vx.signed != null && vx.signed > 0.5 && cb && cb.signed != null && cb.signed < -0.5) tensions.push({ title: 'Calm on the surface, stress underneath', body: `Equity volatility is low (VIX ${vx.value}) while the gap between the weakest and strongest junk borrowers is widening (CCC−BB ${cb.value}%). The marginal borrower is struggling before the index notices; that gap has led the broader spread in past cycles.` });
+  if (vx && vx.signed != null && vx.signed > 0.5 && cb && cb.signed != null && cb.signed < -0.5) tensions.push({ title: 'Calm on the surface, stress underneath', body: `Market volatility is low (${vx.id === 'vol' && vx.unit === 'index' && vx.vix != null && vx.name.startsWith('Market') ? `OFR volatility index ${vx.value}, VIX ${vx.vix}` : `VIX ${vx.value}`}) while the gap between the weakest and strongest junk borrowers is widening (CCC−BB ${cb.value}%). The marginal borrower is struggling before the index notices; that gap has led the broader spread in past cycles.` });
   if (ok(usd) && usd.value < -2 && ok(m2) && m2.value < 3) tensions.push({ title: 'A weak dollar is flattering global liquidity', body: `The broad dollar is down ${Math.abs(usd.value)}% in 13 weeks. In dollar terms that makes foreign money supply look bigger, but constant-currency money growth is only ${m2.value}% annualised — little real money creation. Dollar-driven liquidity reverses on a single hawkish surprise; money-creation-driven liquidity does not.` });
   if (ok(usd) && usd.value > 3) tensions.push({ title: 'A stronger dollar is a global tightening', body: `The broad dollar is up ${usd.value}% in 13 weeks. For every borrower outside the US with dollar debt that is an automatic rise in the repayment burden, and it drains dollar liquidity from emerging markets even when US conditions look fine. Watch the Asia ex-China and Latin America panels.` });
   if (ok(tga) && tga.value > 100) tensions.push({ title: 'The Treasury is hoarding cash', body: `The Treasury's account at the Fed rose $${tga.value}bn in four weeks. Every dollar that moves into it leaves the banking system, so this is a reserve drain that has nothing to do with Fed policy — a fiscal-calendar effect that reverses when the Treasury spends.` });
@@ -355,9 +395,13 @@ module.exports = async (req, res) => {
         { name: 'Office of Financial Research', url: 'https://www.financialresearch.gov/financial-stress-index/', what: 'Financial Stress Index and sub-indices (credit, funding, volatility; US / other advanced / EM)', cadence: 'Daily' },
         { name: 'ECB Data Portal', url: 'https://data.ecb.europa.eu', what: 'Eurosystem liquidity (ILM): current accounts, deposit facility, government deposits; €STR', cadence: 'Weekly (Tuesdays) / daily' },
         { name: 'Bank for International Settlements', url: 'https://data.bis.org', what: 'Central bank policy rates and nominal effective exchange rates for all 15 markets', cadence: 'Daily' },
-        { name: 'CBOE', url: 'https://www.cboe.com/tradable_products/vix/', what: 'VIX daily history', cadence: 'Daily' },
+        { name: 'CBOE', url: 'https://www.cboe.com/tradable_products/vix/', what: 'VIX daily history (context and fallback for the volatility input)', cadence: 'Daily' },
+        { name: 'ECB Data Portal — BSI', url: 'https://data.ecb.europa.eu/data/datasets/BSI', what: 'Euro area M3 (monthly, €mn) for the global M2 aggregate', cadence: 'Monthly (~4 weeks after month-end)' },
+        { name: 'Bank of England — IADB', url: 'https://www.bankofengland.co.uk/boeapps/database/', what: 'UK M4 (LPMAUYN, monthly, £mn) for the global M2 aggregate', cadence: 'Monthly (~4 weeks after month-end)' },
+        { name: 'Bank of Japan — Time-Series Data Search', url: 'https://www.stat-search.boj.or.jp/', what: 'Money stock M2 (monthly average amounts outstanding) for the global M2 aggregate', cadence: 'Monthly (~2nd week of the following month)' },
+        { name: 'BIS — credit to the non-financial sector', url: 'https://data.bis.org/topics/TOTAL_CREDIT', what: 'Credit to China\'s private non-financial sector, % of GDP (via FRED QCNPAM770A; BIS API fallback)', cadence: 'Quarterly (~5 months after quarter-end)' },
         { name: 'Reserve Bank of Australia', url: 'https://www.rba.gov.au/statistics/tables/', what: 'A1 balance sheet (Exchange Settlement balances, repos), F1 money-market rates, F2 bond yields', cadence: 'Weekly (Thursdays) / daily' },
-        { name: 'FRED (Federal Reserve Bank of St Louis)', url: 'https://fred.stlouisfed.org', what: 'Reserve balances, GDP, IORB, ICE BofA credit spreads, BoJ assets, M2 aggregates', cadence: 'H.4.1 Thursdays; daily; monthly', requires: 'FRED_API_KEY' },
+        { name: 'FRED (Federal Reserve Bank of St Louis)', url: 'https://fred.stlouisfed.org', what: 'Reserve balances, GDP, IORB, ICE BofA credit spreads, BoJ assets, US M2, BIS China credit, exchange rates', cadence: 'H.4.1 Thursdays; daily; monthly', requires: 'FRED_API_KEY' },
       ]
     };
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
