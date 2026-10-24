@@ -138,9 +138,12 @@ const SOURCES = {
 // Deleted 10 Sep 2026 (discontinued on FRED, verified): MYAGM2CNM189N (China M2, ends 2019), MYAGM2JPM189N (Japan M2, ends 2017), MYAGM3EZM196N (euro M3, ends 2017), MYAGM2GBM189N (UK M2, HTTP 400).
 const FRED_SERIES = { WRESBAL: 'Reserve balances', GDP: 'US nominal GDP', IORB: 'Interest on reserve balances', HY: 'BAMLH0A0HYM2', CCC: 'BAMLH0A3HYC', BB: 'BAMLH0A1HYBB', IG: 'BAMLC0A0CM', JPNASSETS: 'BoJ total assets', M2SL: 'US M2', CNCR: 'BIS credit to China private non-financial sector, % GDP', WALCL: 'Fed total assets', RRPONTSYD: 'ON RRP', DTWEXBGS: 'Broad dollar', DGS2: 'US 2y', DEXUSEU: 'EUR/USD', DEXJPUS: 'USD/JPY', DEXCHUS: 'USD/CNY', DEXUSUK: 'GBP/USD' };
 const FRED_IDS = { WRESBAL: 'WRESBAL', GDP: 'GDP', IORB: 'IORB', HY: 'BAMLH0A0HYM2', CCC: 'BAMLH0A3HYC', BB: 'BAMLH0A1HYBB', IG: 'BAMLC0A0CM', JPNASSETS: 'JPNASSETS', M2SL: 'M2SL', CNCR: 'QCNPAM770A', WALCL: 'WALCL', RRPONTSYD: 'RRPONTSYD', DGS2: 'DGS2', DEXUSEU: 'DEXUSEU', DEXJPUS: 'DEXJPUS', DEXCHUS: 'DEXCHUS', DEXUSUK: 'DEXUSUK' };
-// Maximum age (days) before a FRED series is treated as discontinued/stale and excluded. Monthly aggregates get 120 days, quarterly GDP 200, weekly 30, daily 14.
+// Maximum age (days) before a FRED series is treated as discontinued/stale and excluded. Monthly aggregates get 120 days, quarterly GDP 300, weekly 30, daily 14.
+// GDP (quarterly, dated at quarter START, advance estimate ~30 days after quarter-end): the latest point is 120-215 days old in normal
+// operation, so the old 200-day limit dropped reserves/GDP for ~2 weeks before every release (TD-1072, 23 Oct 2026: Q2 point 2026-04-01
+// hit 205 days before the 29 Oct Q3 print). 300 days = one missed release plus a delay buffer before it is called discontinued.
 // CNCR (BIS credit, quarterly, dated at quarter start, published ~5.5 months after quarter-end, so the latest point is 8.5–11.5 months old in normal operation): 400 days.
-const FRED_MAX_AGE = { WRESBAL: 30, GDP: 200, IORB: 30, HY: 14, CCC: 14, BB: 14, IG: 14, JPNASSETS: 120, M2SL: 120, CNCR: 400, WALCL: 30, RRPONTSYD: 14, DGS2: 14, DEXUSEU: 14, DEXJPUS: 14, DEXCHUS: 14, DEXUSUK: 14 };
+const FRED_MAX_AGE = { WRESBAL: 30, GDP: 300, IORB: 30, HY: 14, CCC: 14, BB: 14, IG: 14, JPNASSETS: 120, M2SL: 120, CNCR: 400, WALCL: 30, RRPONTSYD: 14, DGS2: 14, DEXUSEU: 14, DEXJPUS: 14, DEXCHUS: 14, DEXUSUK: 14 };
 
 async function loadAll() {
   const D = {}, H = {};
